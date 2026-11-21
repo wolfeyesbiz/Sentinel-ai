@@ -36,7 +36,7 @@ export const AuthScreen: React.FC<{ onAuthenticated: (user: User) => void }> = (
 
   const selectDemo = (account: DemoAccount) => { setMode('login'); setEmail(account.email); setPassword(account.password); setError(''); };
 
-  return <main className="flex min-h-screen items-center justify-center bg-[var(--color-paper)] px-4 py-10 text-zinc-100">
+  return <main className="auth-screen flex min-h-screen items-center justify-center px-4 py-10 text-zinc-100">
     <div className="grid w-full max-w-[900px] overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-paper-2)] md:grid-cols-[1fr_1.05fr]">
       <section className="hidden flex-col justify-between border-r border-[var(--color-rule)] bg-[var(--color-sidebar)] p-9 md:flex">
         <div><div className="flex items-center gap-3"><span className="rounded-xl bg-emerald-500/10 p-3 text-emerald-400"><Shield size={22}/></span><div><div className="font-semibold">Sentinel AI</div><div className="text-xs text-zinc-500">Security console</div></div></div>

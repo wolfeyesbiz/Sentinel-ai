@@ -160,6 +160,38 @@ export const App: React.FC = () => {
     };
   }, [user]);
 
+  useEffect(() => {
+    const dashboard = document.querySelector('.dashboard-main');
+    if (!dashboard) return;
+
+    const sections = Array.from(dashboard.querySelectorAll<HTMLElement>('[data-reveal]'));
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion || !('IntersectionObserver' in window)) {
+      sections.forEach(section => section.classList.add('is-visible'));
+      return;
+    }
+
+    dashboard.classList.add('motion-ready');
+    sections.forEach((section, index) => {
+      section.style.setProperty('--reveal-delay', `${Math.min(index * 75, 300)}ms`);
+    });
+
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add('is-visible');
+        observer.unobserve(entry.target);
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
+
+    sections.forEach(section => observer.observe(section));
+    return () => {
+      observer.disconnect();
+      dashboard.classList.remove('motion-ready');
+      sections.forEach(section => section.style.removeProperty('--reveal-delay'));
+    };
+  }, [user]);
+
   const handleLogout = async () => {
     try { await apiFetch(apiUrl('/api/auth/logout'), { method: 'POST' }); } catch { /* Clear the dashboard locally even if Render is offline. */ }
     window.sessionStorage.removeItem('sentinel_session');
@@ -193,7 +225,7 @@ export const App: React.FC = () => {
   };
 
   if (authLoading) return <div className="auth-loading">Loading Sentinel AI…</div>;
-  if (!user) return <AuthScreen onAuthenticated={setUser} />;
+  if (!user) return <div className="sentinel-app"><AuthScreen onAuthenticated={setUser} /></div>;
 
   return (
     <div className="sentinel-app">
@@ -244,22 +276,22 @@ export const App: React.FC = () => {
           onOpenMenu={() => setMobileNavOpen(true)}
         />
         <main className="dashboard-main">
-          <div className="dashboard-heading">
-            <div><h1>Dashboard</h1><p>Monitor activity and review your connected websites.</p></div>
+          <div className="dashboard-heading" data-reveal>
+            <div><h1>Dashboard</h1><p>Review security findings and live traffic from your connected e-commerce websites.</p></div>
             <div className="dashboard-actions">
               <button className="action-button" onClick={() => setIsSimulatorOpen(true)}><Zap size={15} /> Safe simulation</button>
               <button className="action-button action-button--primary" onClick={() => setIsIntegrationsOpen(true)}><Link2 size={15} /> Add website</button>
             </div>
           </div>
-          <ThreatLevelBanner
+          <div data-reveal><ThreatLevelBanner
             threatLevel={metrics?.threat_level || 'UNKNOWN'}
             activeThreats={metrics?.active_threats ?? null}
             blockedToday={metrics?.blocked_today ?? null}
             riskScore={metrics?.risk_score ?? null}
-          />
-          <MetricCards metrics={metrics} />
-          <DashboardWorkbench packets={trafficPackets} alerts={alerts} />
-          <RecentActivityTable alerts={alerts} onSelectAlert={(alert) => setSelectedAlert(alert)} />
+          /></div>
+          <div data-reveal><MetricCards metrics={metrics} /></div>
+          <div data-reveal><DashboardWorkbench packets={trafficPackets} alerts={alerts} /></div>
+          <div data-reveal><RecentActivityTable alerts={alerts} onSelectAlert={(alert) => setSelectedAlert(alert)} /></div>
         </main>
         <ThreatDetailModal alert={selectedAlert} onClose={() => setSelectedAlert(null)} onBlockIP={handleBlockIP} onUnblockIP={handleUnblockIP} />
         <AttackSimulatorModal isOpen={isSimulatorOpen} onClose={() => setIsSimulatorOpen(false)} onAttackSimulated={fetchOverview} />

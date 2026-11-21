@@ -78,7 +78,7 @@ export const DashboardWorkbench: React.FC<DashboardWorkbenchProps> = ({ packets,
           <line className="timeline-gridline" x1="28" y1="184" x2="732" y2="184" />
           <text className="timeline-axis-label" x="2" y="37">{mode === 'requests' ? maxValue : '1.0'}</text>
           <text className="timeline-axis-label" x="2" y="187">0</text>
-          <path className="timeline-line" d={linePath} />
+          <path className="timeline-line" pathLength={1} d={linePath} />
           {pathPoints.filter(point => point.value > 0).map(point => <circle key={`${point.x}-${point.y}`} className="timeline-point" cx={point.x} cy={point.y} r="4" />)}
           <text className="timeline-axis-label" x="28" y="210">{new Date(now - activeRange.milliseconds).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</text>
           <text className="timeline-axis-label" x="732" y="210" textAnchor="end">Now</text>
