@@ -92,15 +92,15 @@ export const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
   };
 
   return (
-    <div className="bg-[#0A1929]/90 border border-[#1E3A5F] rounded-xl p-4 md:p-6 shadow-xl mb-8">
+    <div className="bg-[#141414] border border-[#252525] rounded-xl p-4 md:p-6 mb-8">
       {/* Table Header and Filters */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4 pb-4 border-b border-[#1E3A5F]">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4 pb-4 border-b border-[#292929]">
         <div>
-          <h3 className="text-lg font-bold font-mono text-white tracking-wide">
-            RECENT ACTIVITY (Last 1 Hour)
+          <h3 className="text-lg font-bold font-semibold text-zinc-100">
+            Recent activity
           </h3>
           <p className="text-xs text-slate-400 font-mono">
-            Real-time telemetry stream · Click any alert row to view immediate remediation & code fixes
+            Latest security events. Select an event to review details.
           </p>
         </div>
 
@@ -114,19 +114,19 @@ export const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
               placeholder="Search IP, URL, Threat..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              className="bg-[#0F2137] border border-[#1E3A5F] rounded text-xs pl-8 pr-3 py-1.5 text-white placeholder-slate-500 focus:outline-none focus:border-[#00D9FF] w-48 sm:w-60 font-mono"
+              className="bg-[#101010] border border-[#292929] rounded text-xs pl-8 pr-3 py-1.5 text-white placeholder-slate-500 focus:outline-none focus:border-[#00D9FF] w-48 sm:w-60 font-mono"
             />
           </div>
 
           {/* Severity Tabs */}
-          <div className="flex items-center bg-[#0F2137] border border-[#1E3A5F] rounded p-0.5 text-xs font-mono">
+          <div className="flex items-center bg-[#101010] border border-[#292929] rounded p-0.5 text-xs font-mono">
             {['all', 'critical', 'warning', 'info'].map(sev => (
               <button
                 key={sev}
                 onClick={() => setFilterSeverity(sev)}
                 className={`px-2.5 py-1 rounded capitalize transition-all cursor-pointer ${
                   filterSeverity === sev
-                    ? 'bg-[#00D9FF] text-black font-semibold shadow'
+                    ? 'bg-emerald-500 text-black font-semibold shadow'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
@@ -141,7 +141,7 @@ export const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs font-mono">
           <thead>
-            <tr className="border-b border-[#1E3A5F] text-slate-400 font-medium">
+            <tr className="border-b border-[#292929] text-slate-400 font-medium">
               <th className="py-2.5 px-3">TIMESTAMP</th>
               <th className="py-2.5 px-3">SEVERITY</th>
               <th className="py-2.5 px-3">THREAT TYPE</th>
@@ -152,7 +152,7 @@ export const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
               <th className="py-2.5 px-3 text-right">ACTION</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-[#1E3A5F]/40">
+          <tbody className="divide-y divide-[#292929]">
             {filtered.length === 0 ? (
               <tr>
                 <td colSpan={8} className="py-8 text-center text-slate-400 font-mono">
@@ -164,7 +164,7 @@ export const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
                 <tr
                   key={item.id}
                   onClick={() => onSelectAlert(item)}
-                  className="hover:bg-[#0F2744]/70 transition-colors cursor-pointer group"
+                  className="hover:bg-white/[0.03] transition-colors cursor-pointer group"
                 >
                   <td className="py-3 px-3 text-slate-300 font-semibold whitespace-nowrap">
                     {formatTime(item.timestamp)}
@@ -176,7 +176,7 @@ export const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
                     {item.threat_type.replace('_', ' ').toUpperCase()}
                   </td>
                   <td className="py-3 px-3 text-slate-300 whitespace-nowrap">
-                    <span className="text-[#00D9FF] font-semibold">{item.source_ip}</span>
+                    <span className="text-emerald-400 font-semibold">{item.source_ip}</span>
                     <span className="ml-1.5 text-[10px] text-slate-400">({item.country})</span>
                   </td>
                   <td className="py-3 px-3 text-slate-300 max-w-xs truncate" title={item.target}>
@@ -198,7 +198,7 @@ export const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
                         e.stopPropagation();
                         onSelectAlert(item);
                       }}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-[#0F2744] hover:bg-[#00D9FF] hover:text-black text-[#00D9FF] border border-[#00D9FF]/30 transition-all font-semibold"
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-[#0F2744] hover:bg-emerald-500 hover:text-black text-emerald-400 border border-[#00D9FF]/30 transition-all font-semibold"
                     >
                       <span>Remediate</span>
                       <ArrowUpRight className="w-3 h-3" />

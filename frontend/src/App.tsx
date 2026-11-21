@@ -12,7 +12,7 @@ import { LiveTrafficDrawer } from './components/LiveTrafficDrawer';
 import { IntegrationsModal } from './components/IntegrationsModal';
 import { soundAlert } from './SoundAlert';
 import { AlertItem, SystemMetrics, TrafficPacket } from './types';
-import { ShieldAlert, Zap, Globe, Lock, FileText, Activity } from 'lucide-react';
+import { Shield, LayoutDashboard, Link2, Radio, Globe, Lock, FileText, Map, Volume2, Menu, X } from 'lucide-react';
 import { apiUrl, WS_BASE } from './api';
 
 export const App: React.FC = () => {
@@ -33,6 +33,7 @@ export const App: React.FC = () => {
   const [wsConnected, setWsConnected] = useState(false);
   const [lastScanSeconds, setLastScanSeconds] = useState(2);
   const [soundEnabled, setSoundEnabled] = useState(soundAlert.enabled);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
   // Ticking timer for "Last Scan: Xs ago"
@@ -169,8 +170,23 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#06101E] text-slate-100 flex flex-col selection:bg-[#00D9FF] selection:text-black">
-      {/* Top Navigation */}
+    <div className="min-h-screen bg-[#090909] text-zinc-100 selection:bg-emerald-500 selection:text-black">
+      <aside className={`fixed inset-y-0 left-0 z-40 flex w-[228px] flex-col border-r border-[#222] bg-[#070707] transition-transform md:translate-x-0 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="flex h-[68px] items-center gap-3 border-b border-[#222] px-5"><span className="rounded-lg bg-emerald-500/10 p-2 text-emerald-500"><Shield size={18}/></span><div><div className="text-sm font-semibold">Sentinel AI</div><div className="text-[10px] tracking-wide text-zinc-500">SECURITY CONSOLE</div></div><button className="ml-auto text-zinc-500 md:hidden" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation"><X size={18}/></button></div>
+        <div className="px-3 pt-6"><div className="px-2 pb-2 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-600">Overview</div><button onClick={() => setMobileNavOpen(false)} className="flex w-full items-center gap-3 rounded-lg bg-emerald-500/10 px-3 py-2.5 text-left text-sm text-emerald-400"><LayoutDashboard size={16}/> Dashboard</button></div>
+        <div className="px-3 pt-7"><div className="px-2 pb-2 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-600">Monitor</div>
+          <button onClick={() => {setIsIntegrationsOpen(true);setMobileNavOpen(false)}} className="side-link"><Link2 size={16}/> Websites</button>
+          <button onClick={() => {setIsTrafficOpen(true);setMobileNavOpen(false)}} className="side-link"><Radio size={16}/> Live traffic</button>
+          <button onClick={() => {setIsMapOpen(true);setMobileNavOpen(false)}} className="side-link"><Globe size={16}/> Threat map</button>
+        </div>
+        <div className="px-3 pt-7"><div className="px-2 pb-2 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-600">Response</div>
+          <button onClick={() => {setIsFirewallOpen(true);setMobileNavOpen(false)}} className="side-link"><Lock size={16}/> Firewall</button>
+          <button onClick={() => {setIsReportOpen(true);setMobileNavOpen(false)}} className="side-link"><FileText size={16}/> Security reports</button>
+        </div>
+        <div className="mt-auto border-t border-[#222] p-4"><div className="flex items-center gap-3"><span className={`h-2 w-2 rounded-full ${wsConnected ? 'bg-emerald-500' : 'bg-zinc-600'}`}/><div><div className="text-xs text-zinc-300">Monitoring {wsConnected ? 'active' : 'connecting'}</div><div className="mt-0.5 text-[10px] text-zinc-600">Sentinel system status</div></div></div></div>
+      </aside>
+      {mobileNavOpen && <button className="fixed inset-0 z-30 bg-black/60 md:hidden" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)}/>}
+      <div className="min-h-screen md:ml-[228px]">
       <Navbar
         systemStatus={metrics?.system_status || 'PROTECTED'}
         lastScanSeconds={lastScanSeconds}
@@ -183,15 +199,17 @@ export const App: React.FC = () => {
         onOpenReport={() => setIsReportOpen(true)}
         onOpenTraffic={() => setIsTrafficOpen(true)}
         onOpenIntegrations={() => setIsIntegrationsOpen(true)}
+        onOpenMenu={() => setMobileNavOpen(true)}
       />
 
       {/* Main Dashboard Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-6">
+      <main className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-8">
+        <div className="mb-5"><p className="text-xs text-zinc-500">Security overview</p><h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-100">Dashboard</h1><p className="mt-1 text-sm text-zinc-500">Monitor activity and review your connected websites.</p></div>
         {/* Threat Level Banner */}
         <ThreatLevelBanner
           threatLevel={metrics?.threat_level || 'LOW'}
           activeThreats={metrics?.active_threats || 0}
-          blockedToday={metrics?.blocked_today || 47}
+          blockedToday={metrics?.blocked_today || 0}
           riskScore={metrics?.risk_score || 0.12}
         />
 
@@ -204,50 +222,6 @@ export const App: React.FC = () => {
           onSelectAlert={(alert) => setSelectedAlert(alert)}
         />
 
-        {/* Bottom Quick-Action Buttons matching wireframe */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 pb-8 border-t border-[#1E3A5F]">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsSimulatorOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-mono text-xs font-bold shadow transition-all cursor-pointer"
-            >
-              <Zap className="w-4 h-4 fill-current" />
-              <span>[Simulate Attack]</span>
-            </button>
-
-            <button
-              onClick={() => setIsMapOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded bg-[#0A1929] hover:bg-[#0F2744] text-slate-200 border border-[#1E3A5F] font-mono text-xs font-medium transition-all cursor-pointer"
-            >
-              <Globe className="w-4 h-4 text-[#00D9FF]" />
-              <span>[Threat Map]</span>
-            </button>
-
-            <button
-              onClick={() => setIsReportOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded bg-[#0A1929] hover:bg-[#0F2744] text-slate-200 border border-[#1E3A5F] font-mono text-xs font-medium transition-all cursor-pointer"
-            >
-              <FileText className="w-4 h-4 text-emerald-400" />
-              <span>[Security Report]</span>
-            </button>
-
-            <button
-              onClick={() => setIsFirewallOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded bg-[#0A1929] hover:bg-[#0F2744] text-slate-200 border border-[#1E3A5F] font-mono text-xs font-medium transition-all cursor-pointer"
-            >
-              <Lock className="w-4 h-4 text-amber-400" />
-              <span>[Firewall Rules]</span>
-            </button>
-          </div>
-
-          <button
-            onClick={() => setIsTrafficOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded bg-[#0A1929] hover:bg-[#0F2744] text-[#00D9FF] border border-[#00D9FF]/30 font-mono text-xs font-medium transition-all cursor-pointer"
-          >
-            <Activity className="w-4 h-4 text-[#00D9FF]" />
-            <span>[Live Stream Inspector]</span>
-          </button>
-        </div>
       </main>
 
       {/* Threat Detail Modal */}
@@ -292,6 +266,7 @@ export const App: React.FC = () => {
         packets={trafficPackets}
       />
       <IntegrationsModal isOpen={isIntegrationsOpen} onClose={() => setIsIntegrationsOpen(false)} />
+      </div>
     </div>
   );
 };
