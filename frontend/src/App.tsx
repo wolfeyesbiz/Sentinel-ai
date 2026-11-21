@@ -207,11 +207,18 @@ export const App: React.FC = () => {
   };
 
   const handleBlockIP = async (ip: string, reason: string) => {
-    await apiFetch(apiUrl('/api/security/block-ip'), {
+    const response = await apiFetch(apiUrl('/api/security/block-ip'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ip_address: ip, duration_hours: 0, reason }) // permanent
     });
+    if (!response.ok) throw new Error('Could not block this IP.');
+    const result: { mitigated_at?: string | null } = await response.json();
+    if (result.mitigated_at) {
+      setSelectedAlert(current => current?.source_ip === ip
+        ? { ...current, mitigated_at: result.mitigated_at }
+        : current);
+    }
     await fetchOverview();
   };
 

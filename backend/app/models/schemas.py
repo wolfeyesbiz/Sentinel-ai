@@ -84,6 +84,7 @@ class AlertItem(BaseModel):
     country: str = "United States"
     target: str
     status: ThreatStatus
+    mitigated_at: Optional[str] = None
     risk_score: float
     description: str
     payload: Optional[str] = None
@@ -114,6 +115,8 @@ class BlockIPResponse(BaseModel):
     blocked_until: Optional[str] = None
     permanent: bool = False
     message: str
+    mitigated_alerts: int = 0
+    mitigated_at: Optional[str] = None
 
 class BlockedIPItem(BaseModel):
     ip_address: str

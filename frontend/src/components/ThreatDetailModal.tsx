@@ -34,7 +34,7 @@ export const ThreatDetailModal: React.FC<ThreatDetailModalProps> = ({
     setIsBlocking(true);
     try {
       await onBlockIP(alert.source_ip, `Permanent manual block for ${alert.threat_type}`);
-      setActionMessage(`IP ${alert.source_ip} permanently blocked.`);
+      setActionMessage(`IP ${alert.source_ip} permanently blocked; matching alerts marked mitigated.`);
     } catch {
       setActionMessage('Failed to block IP.');
     } finally {
@@ -71,6 +71,7 @@ export const ThreatDetailModal: React.FC<ThreatDetailModalProps> = ({
                 <span className="text-xs font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
                   Status: {alert.status.toUpperCase()} ✓
                 </span>
+                {alert.mitigated_at && <span className="text-xs font-mono text-[var(--color-ok)] bg-[var(--color-ok-soft)] px-2 py-0.5 rounded border border-[var(--color-ok)]/30">Mitigated</span>}
               </div>
               <h2 className="text-xl font-bold font-mono text-white mt-0.5">
                 {alert.threat_type.replace('_', ' ').toUpperCase()} ATTEMPT

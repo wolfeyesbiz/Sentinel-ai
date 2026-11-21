@@ -51,6 +51,7 @@ class Database:
                     country TEXT NOT NULL,
                     target TEXT NOT NULL,
                     status TEXT NOT NULL,
+                    mitigated_at TEXT,
                     risk_score REAL NOT NULL,
                     description TEXT NOT NULL,
                     payload TEXT,
@@ -59,6 +60,9 @@ class Database:
                     remediation_json TEXT
                 )
             """)
+            alert_columns = {row["name"] for row in cursor.execute("PRAGMA table_info(alerts)").fetchall()}
+            if "mitigated_at" not in alert_columns:
+                cursor.execute("ALTER TABLE alerts ADD COLUMN mitigated_at TEXT")
             
             # Blocked IPs table
             cursor.execute("""
@@ -92,9 +96,9 @@ class Database:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT OR REPLACE INTO alerts (
-                    id, timestamp, severity, threat_type, source_ip, country, target, status,
+                    id, timestamp, severity, threat_type, source_ip, country, target, status, mitigated_at,
                     risk_score, description, payload, attack_vector, details_json, remediation_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 alert.id,
                 alert.timestamp,
@@ -104,6 +108,7 @@ class Database:
                 alert.country,
                 alert.target,
                 alert.status.value,
+                alert.mitigated_at,
                 alert.risk_score,
                 alert.description,
                 alert.payload,
@@ -112,6 +117,26 @@ class Database:
                 alert.remediation.model_dump_json() if alert.remediation else None
             ))
             conn.commit()
+
+    def mitigate_alerts_for_ip(self, ip_address: str, mitigated_at: str) -> int:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE alerts SET mitigated_at = ? WHERE source_ip = ? AND mitigated_at IS NULL",
+                (mitigated_at, ip_address),
+            )
+            conn.commit()
+            return cursor.rowcount
+
+    def resolve_alert(self, alert_id: str, resolved_at: str) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE alerts SET status = 'resolved', mitigated_at = COALESCE(mitigated_at, ?) WHERE id = ?",
+                (resolved_at, alert_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
 
     def get_recent_alerts(self, limit: int = 50, severity: Optional[str] = None) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:

@@ -61,6 +61,22 @@ class MemoryStore:
             self.total_threats_blocked += 1
         self.recent_alerts.appendleft(alert_dict)
 
+    def mitigate_alerts_for_ip(self, ip_address: str, mitigated_at: str) -> int:
+        count = 0
+        for alert in self.recent_alerts:
+            if alert.get("source_ip") == ip_address and not alert.get("mitigated_at"):
+                alert["mitigated_at"] = mitigated_at
+                count += 1
+        return count
+
+    def resolve_alert(self, alert_id: str, resolved_at: str) -> bool:
+        for alert in self.recent_alerts:
+            if alert.get("id") == alert_id:
+                alert["status"] = "resolved"
+                alert["mitigated_at"] = alert.get("mitigated_at") or resolved_at
+                return True
+        return False
+
     def track_request_rate(self, ip: str) -> int:
         """Returns requests in the last 1 second for DoS detection."""
         now = time.time()
@@ -104,12 +120,13 @@ class MemoryStore:
             self.last_network_check = now
 
         # Compute dynamic threat level
+        active_alerts = [a for a in list(self.recent_alerts)[:15] if not a.get("mitigated_at")]
         recent_crit_count = sum(
-            1 for a in list(self.recent_alerts)[:15] 
+            1 for a in active_alerts
             if a.get("severity") in ("critical", "emergency")
         )
         recent_warn_count = sum(
-            1 for a in list(self.recent_alerts)[:15] 
+            1 for a in active_alerts
             if a.get("severity") == "warning"
         )
         

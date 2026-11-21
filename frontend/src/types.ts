@@ -32,6 +32,7 @@ export interface AlertItem {
   country: string;
   target: string;
   status: ThreatStatus;
+  mitigated_at?: string | null;
   risk_score: number;
   description: string;
   payload?: string;

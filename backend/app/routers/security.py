@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from typing import List, Dict, Any
 from app.models.schemas import BlockIPRequest, BlockIPResponse, BlockedIPItem, WafRule, ThreatType, ThreatStatus
 from app.storage.db import db
+from app.storage.memory_store import memory_store
 from datetime import datetime, timezone
 
 router = APIRouter(prefix="/security", tags=["Security & Firewall"])
@@ -59,18 +60,27 @@ active_waf_rules: List[WafRule] = list(DEFAULT_WAF_RULES)
 
 @router.post("/block-ip", response_model=BlockIPResponse)
 async def block_ip_endpoint(req: BlockIPRequest):
+    permanent = req.duration_hours <= 0
     item = db.block_ip(
         ip_address=req.ip_address,
         reason=req.reason,
         duration_hours=req.duration_hours,
-        permanent=(req.duration_hours <= 0)
+        permanent=permanent
     )
+    mitigated_at = None
+    mitigated_alerts = 0
+    if permanent:
+        mitigated_at = datetime.now(timezone.utc).isoformat()
+        mitigated_alerts = db.mitigate_alerts_for_ip(req.ip_address, mitigated_at)
+        memory_store.mitigate_alerts_for_ip(req.ip_address, mitigated_at)
     return BlockIPResponse(
         success=True,
         ip_address=item.ip_address,
         blocked_until=item.blocked_until,
         permanent=item.permanent,
-        message=f"IP address {item.ip_address} successfully added to Sentinel AI blocklist."
+        message=f"IP address {item.ip_address} successfully added to Sentinel AI blocklist.",
+        mitigated_alerts=mitigated_alerts,
+        mitigated_at=mitigated_at,
     )
 
 @router.post("/unblock-ip")

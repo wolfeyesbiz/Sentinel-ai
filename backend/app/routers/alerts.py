@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query
+from datetime import datetime, timezone
 from typing import Optional, List
 from app.storage.db import db
 from app.storage.memory_store import memory_store
@@ -25,11 +26,9 @@ async def resolve_alert(alert_id: str):
     alert = db.get_alert_by_id(alert_id)
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
-    # Update status to resolved
-    with db._get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("UPDATE alerts SET status = 'resolved' WHERE id = ?", (alert_id,))
-        conn.commit()
+    resolved_at = datetime.now(timezone.utc).isoformat()
+    db.resolve_alert(alert_id, resolved_at)
+    memory_store.resolve_alert(alert_id, resolved_at)
     return {"success": True, "alert_id": alert_id, "status": "resolved"}
 
 @router.post("/clear")

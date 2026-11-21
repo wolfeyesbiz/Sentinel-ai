@@ -20,7 +20,7 @@ export const ThreatLevelBanner: React.FC<ThreatLevelBannerProps> = ({ threatLeve
   return <section className="panel defense-banner" data-tone={tone} aria-label="Defense status">
     <div className="defense-copy">
       <span className="defense-icon"><Icon size={20} aria-hidden="true" /></span>
-      <div><div className="defense-label">Defense status</div><div className="defense-level">{level} <span className="defense-label">Risk score {score}</span></div></div>
+      <div><div className="defense-label">Defense status</div><div className="defense-level">{level} <span className="defense-label">Active risk score {score}</span></div></div>
     </div>
     <dl className="defense-stats">
       <div className="defense-stat"><dt>Active threats</dt><dd>{activeThreats ?? '—'}</dd></div>

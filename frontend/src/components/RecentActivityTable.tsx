@@ -40,7 +40,7 @@ export const RecentActivityTable: React.FC<RecentActivityTableProps> = ({ alerts
         <td>{item.threat_type.replaceAll('_', ' ')}</td>
         <td><span className="measured-cell">{item.source_ip}</span><span className="country-cell"> {item.country}</span></td>
         <td className="target-cell" title={item.target}>{item.target}</td>
-        <td><span className={`status-badge status-badge--${item.status}`}>{item.status}</span></td>
+        <td><span className={`status-badge status-badge--${item.status}`}>{item.status}{item.mitigated_at ? ' · mitigated' : ''}</span></td>
         <td className="measured-cell">{item.risk_score.toFixed(2)}</td>
         <td><button className="activity-link" onClick={e => { e.stopPropagation(); onSelectAlert(item); }}>Review</button></td>
       </tr>)}</tbody>
