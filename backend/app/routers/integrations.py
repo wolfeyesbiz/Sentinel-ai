@@ -7,7 +7,7 @@ import socket
 import time
 import uuid
 from datetime import datetime, timezone
-from urllib.parse import urlencode, urlparse, urlunparse
+from urllib.parse import urlencode, urljoin, urlparse, urlunparse
 
 import httpx
 from fastapi import APIRouter, File, Header, HTTPException, UploadFile
@@ -24,6 +24,15 @@ last_host_assessment_at: dict[str, float] = {}
 last_code_scan_at: dict[str, float] = {}
 MAX_RESPONSE_BYTES = 256_000
 ASSESSMENT_INTERVAL_SECONDS = 30
+REDIRECT_CODES = (301, 302, 303, 307, 308)
+HEADER_FIXES = {
+    "Content-Security-Policy": ("medium", "Limits where scripts and resources can load from, which helps reduce XSS impact.", "Content-Security-Policy: default-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'self'; base-uri 'self'"),
+    "Strict-Transport-Security": ("medium", "Tells browsers to keep using HTTPS after a secure visit.", "Strict-Transport-Security: max-age=31536000; includeSubDomains"),
+    "X-Content-Type-Options": ("low", "Stops browsers from guessing file types, which can make uploaded content safer.", "X-Content-Type-Options: nosniff"),
+    "Frame protection": ("medium", "Prevents other sites from embedding the page in a frame (clickjacking).", "Content-Security-Policy: frame-ancestors 'self'  (or)  X-Frame-Options: DENY"),
+    "Referrer-Policy": ("low", "Limits referrer details sent to other sites.", "Referrer-Policy: strict-origin-when-cross-origin"),
+    "Permissions-Policy": ("low", "Restricts browser features that the site does not need.", "Permissions-Policy: camera=(), microphone=(), geolocation=()"),
+}
 
 
 class IntegrationCreate(BaseModel):
@@ -50,8 +59,8 @@ def _validated_url(value: str) -> str:
     return value.strip().rstrip("/")
 
 
-def _assessment_target(item: dict, render_only: bool = False) -> tuple[str, str]:
-    target = _validated_url(item["url"])
+async def _assessment_target(item: dict, render_only: bool = False) -> tuple[str, str]:
+    target = await asyncio.to_thread(_validated_url, item["url"])
     parsed = urlparse(target)
     host = parsed.hostname or ""
     if render_only and not host.endswith(".onrender.com"):
@@ -59,11 +68,11 @@ def _assessment_target(item: dict, render_only: bool = False) -> tuple[str, str]
     return target, host
 
 
-def _begin_assessment(integration_id: str, render_only: bool = False) -> tuple[str, str]:
+async def _begin_assessment(integration_id: str, render_only: bool = False) -> tuple[str, str]:
     item = integrations.get(integration_id)
     if not item:
         raise HTTPException(404, "Integration not found.")
-    target, host = _assessment_target(item, render_only)
+    target, host = await _assessment_target(item, render_only)
     now = time.monotonic()
     if now - last_assessment_at.get(integration_id, 0) < ASSESSMENT_INTERVAL_SECONDS or now - last_host_assessment_at.get(host, 0) < ASSESSMENT_INTERVAL_SECONDS:
         raise HTTPException(429, "This demo was assessed recently. Wait 30 seconds before running another assessment.")
@@ -97,6 +106,43 @@ async def _get_root(client: httpx.AsyncClient, target: str, probe_value: str | N
             }
     except httpx.HTTPError as exc:
         return {"status_code": None, "headers": {}, "body": "", "latency_ms": round((time.monotonic() - started) * 1000), "error": type(exc).__name__}
+
+
+async def _get_root_following(client: httpx.AsyncClient, target: str, max_hops: int = 3) -> dict:
+    """Follow a few same-host HTTPS redirects, revalidating each destination."""
+    current, hops = target, []
+    original_host = (urlparse(target).hostname or "").lower()
+    for _ in range(max_hops + 1):
+        result = await _get_root(client, current)
+        location = result["headers"].get("location") if result["headers"] else None
+        if result["status_code"] in REDIRECT_CODES and location:
+            nxt = urljoin(current, location)
+            if len(hops) >= max_hops:
+                result["redirect_chain"], result["downgraded"], result["final_url"] = hops, False, current
+                result["redirect_blocked"] = True
+                result["redirect_error"] = "Redirect limit reached."
+                return result
+            parsed_next = urlparse(nxt)
+            hops.append(f"{result['status_code']} -> {nxt}")
+            if parsed_next.scheme != "https":
+                result["redirect_chain"], result["downgraded"], result["final_url"] = hops, True, current
+                return result
+            if (parsed_next.hostname or "").lower() != original_host:
+                result["redirect_chain"], result["downgraded"], result["final_url"] = hops, False, current
+                result["redirect_blocked"] = True
+                return result
+            try:
+                current = await asyncio.to_thread(_validated_url, nxt)
+            except HTTPException as exc:
+                result["redirect_chain"], result["downgraded"], result["final_url"] = hops, False, current
+                result["redirect_blocked"] = True
+                result["redirect_error"] = exc.detail
+                return result
+            continue
+        result["redirect_chain"], result["downgraded"], result["final_url"] = hops, False, current
+        return result
+    result["redirect_chain"], result["downgraded"], result["final_url"] = hops, False, current
+    return result
 
 
 def _run_safe_probes(baseline_body: str, xss_marker: str, xss_response: dict, sql_response: dict) -> list[dict]:
@@ -133,7 +179,7 @@ async def list_integrations():
 
 @router.post("")
 async def add_integration(body: IntegrationCreate):
-    url = _validated_url(body.url)
+    url = await asyncio.to_thread(_validated_url, body.url)
     item = {"id": uuid.uuid4().hex[:12], "name": body.name.strip(), "url": url,
             "key": secrets.token_urlsafe(32), "status": "not_checked", "checked_at": None,
             "http_status": None, "latency_ms": None, "last_event_at": None,
@@ -157,7 +203,7 @@ async def check_site(integration_id: str):
     item = integrations.get(integration_id)
     if not item:
         raise HTTPException(404, "Integration not found.")
-    _validated_url(item["url"])
+    await asyncio.to_thread(_validated_url, item["url"])
     started = datetime.now(timezone.utc)
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(12.0, connect=6.0), follow_redirects=False) as client:
@@ -270,76 +316,118 @@ async def scan_uploaded_source(integration_id: str, file: UploadFile = File(...)
 
 @router.post("/{integration_id}/scan")
 async def scan_site(integration_id: str):
-    target, host = _begin_assessment(integration_id)
+    target, _host = await _begin_assessment(integration_id)
     item = integrations[integration_id]
     async with httpx.AsyncClient(timeout=httpx.Timeout(12.0, connect=6.0), follow_redirects=False, max_redirects=0, headers={"User-Agent": "SentinelAI-SecurityReview/1.0 (passive checks)"}) as client:
-        baseline = await _get_root(client, target)
+        baseline = await _get_root_following(client, target)
         if baseline["error"]:
             raise HTTPException(502, f"The website could not be reached ({baseline['error']}). Check its URL and try again.")
 
         headers = baseline["headers"]
         checks = []
+        def add(title, result, severity, details, recommendation="", fix=""):
+            checks.append({"title": title, "result": result, "severity": severity, "details": details,
+                           "recommendation": recommendation, "fix": fix})
+
+        if baseline.get("downgraded"):
+            add("Redirect leaves HTTPS", "https_downgrade", "high",
+                f"The site redirected away from HTTPS: {' -> '.join(baseline['redirect_chain'])}",
+                "Redirect only to HTTPS URLs.", "return 301 https://$host$request_uri;   # nginx")
+        elif baseline.get("redirect_blocked"):
+            add("Cross-host redirect not followed", "redirect_not_followed", "info",
+                "The page redirects to a different hostname. Sentinel stopped before requesting that host; add the destination as a separate integration if it is in scope.")
+        status_code = baseline["status_code"]
+        if status_code in (401, 403, 429):
+            add("Site blocked the scanner", f"http_{status_code}", "info",
+                f"The site answered HTTP {status_code}. A firewall or bot protection may be hiding the page, so these results may be incomplete.")
+
         csp = headers.get("content-security-policy", "")
-        header_checks = [
-            ("Content-Security-Policy", bool(csp), "Helps limit script and resource injection."),
-            ("Strict-Transport-Security", bool(headers.get("strict-transport-security")), "Keeps browsers on HTTPS after the first secure visit."),
-            ("X-Content-Type-Options", headers.get("x-content-type-options", "").lower() == "nosniff", "Prevents MIME type sniffing."),
-            ("Frame protection", "frame-ancestors" in csp.lower() or headers.get("x-frame-options", "").lower() in ("deny", "sameorigin"), "Helps protect against clickjacking."),
-            ("Referrer-Policy", bool(headers.get("referrer-policy")), "Controls referrer information sent to other sites."),
-            ("Permissions-Policy", bool(headers.get("permissions-policy")), "Restricts browser features the page can use."),
-        ]
-        for title, present, explanation in header_checks:
-            checks.append({"title": title, "result": "present" if present else "missing", "severity": "info" if present else "low", "details": explanation if present else f"{title} was not present on the root response. Consider configuring it if appropriate for this site."})
+        present = {
+            "Content-Security-Policy": bool(csp),
+            "Strict-Transport-Security": bool(headers.get("strict-transport-security")),
+            "X-Content-Type-Options": headers.get("x-content-type-options", "").lower() == "nosniff",
+            "Frame protection": "frame-ancestors" in csp.lower() or headers.get("x-frame-options", "").lower() in ("deny", "sameorigin"),
+            "Referrer-Policy": bool(headers.get("referrer-policy")),
+            "Permissions-Policy": bool(headers.get("permissions-policy")),
+        }
+        for title, configured in present.items():
+            severity, explanation, fix = HEADER_FIXES[title]
+            if configured:
+                add(title, "present", "info", "Configured.")
+            else:
+                add(f"Missing {title}", "missing", severity, explanation,
+                    f"Add the {title} response header at your web server, CDN, or app middleware.", fix)
 
         cookies = headers.get_list("set-cookie") if hasattr(headers, "get_list") else []
         for cookie in cookies:
             lower_cookie = cookie.lower()
             missing = [flag for flag in ("secure", "httponly", "samesite") if flag not in lower_cookie]
             if missing:
-                checks.append({"title": "Cookie attributes", "result": "review", "severity": "low", "details": f"A cookie response is missing: {', '.join(missing)}. Review whether those attributes are appropriate."})
+                cookie_name = cookie.split("=", 1)[0].strip()[:40]
+                severity = "medium" if "httponly" in missing or "secure" in missing else "low"
+                add(f"Cookie '{cookie_name}' missing flags", "review", severity,
+                    f"Missing: {', '.join(missing)}.",
+                    "Set Secure (HTTPS only), HttpOnly (hidden from JavaScript), and SameSite (CSRF protection) on session cookies.",
+                    "Set-Cookie: session=...; Secure; HttpOnly; SameSite=Lax")
 
         page = baseline["body"]
         content_type = headers.get("content-type", "").lower()
         server_banner = headers.get("server", "") + " " + headers.get("x-powered-by", "")
         if re.search(r"(?:apache|nginx|iis|php|express)[/ ]\d", server_banner, re.IGNORECASE):
-            checks.append({"title": "Server version disclosure", "result": "version_banner_observed", "severity": "low", "details": "A response header appears to disclose a server or framework version. Review whether the version detail is needed publicly."})
+            add("Server version disclosed", "version_banner_observed", "low",
+                f"Headers reveal: {server_banner.strip()[:80]}",
+                "Hide version numbers so attackers cannot target known issues for an exact version.",
+                "server_tokens off;   # nginx\nServerTokens Prod   # Apache\napp.disable('x-powered-by')   // Express")
         if "html" in content_type or "<html" in page[:1000].lower():
             if re.search(r"(?:src|poster)\s*=\s*['\"]http://|url\(\s*['\"]?http://", page, re.IGNORECASE):
-                checks.append({"title": "Mixed HTTP content reference", "result": "potential_mixed_content", "severity": "low", "details": "The homepage contains an HTTP resource or link reference. Review whether any active page resources can be upgraded to HTTPS."})
+                add("Mixed HTTP content reference", "potential_mixed_content", "low",
+                    "The homepage contains an HTTP resource reference. Upgrade active page resources to HTTPS.",
+                    "Load scripts, styles, images, and media over HTTPS.", '<script src="https://static.example.com/app.js"></script>')
             for form in re.findall(r"<form\b[^>]*>", page, re.IGNORECASE)[:40]:
                 action = re.search(r"action\s*=\s*['\"]([^'\"]+)['\"]", form, re.IGNORECASE)
                 if action and action.group(1).lower().startswith("http://"):
-                    checks.append({"title": "Form submits over HTTP", "result": "insecure_form_action", "severity": "medium", "details": "A form on the homepage appears to submit to an unencrypted HTTP URL."})
+                    add("Form submits over HTTP", "insecure_form_action", "medium",
+                        "A form on the homepage appears to submit to an unencrypted HTTP URL.",
+                        "Change the form action to HTTPS.", '<form action="https://shop.example.com/submit" method="post">')
                     break
             for script in re.findall(r"<script\b[^>]*\bsrc\s*=\s*['\"][^'\"]+['\"][^>]*>", page, re.IGNORECASE)[:30]:
                 src = re.search(r"\bsrc\s*=\s*['\"]([^'\"]+)['\"]", script, re.IGNORECASE)
                 if src and src.group(1).startswith("https://") and "integrity=" not in script.lower():
-                    checks.append({"title": "External script without integrity attribute", "result": "review_external_script", "severity": "info", "details": "An external HTTPS script has no Subresource Integrity attribute. Review whether SRI is practical for this script."})
+                    add("External script without integrity attribute", "review_external_script", "info",
+                        "An external HTTPS script has no Subresource Integrity attribute. Review whether SRI is practical for this script.",
+                        "Pin the script contents with a current SRI hash where the provider supports stable assets.",
+                        '<script src="https://cdn.example.com/library.js" integrity="sha384-<computed-hash>" crossorigin="anonymous"></script>')
                     break
 
-    probes = []
-
+    order = {"high": 0, "medium": 1, "low": 2, "info": 3}
+    checks.sort(key=lambda check: order.get(check["severity"], 4))
     findings = sum(1 for check in checks if check["severity"] in ("low", "medium", "high"))
+    checked_at = datetime.now(timezone.utc).isoformat()
     report = {
         "integration_id": integration_id,
-        "site": item["url"],
-        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "site": baseline.get("final_url", item["url"]),
+        "checked_at": checked_at,
         "http_status": baseline["status_code"],
         "latency_ms": baseline["latency_ms"],
         "summary": "potential findings" if findings else "no issues observed by these checks",
         "finding_count": findings,
         "checks": checks,
-        "probes": probes,
-        "scope": "One bounded, read-only HTTPS GET to the registered page. Checks response headers, cookies and visible homepage markup; does not inspect server files, authenticate, submit forms, or prove the site secure.",
+        "probes": [],
+        "redirects": baseline.get("redirect_chain", []),
+        "scope": "One bounded, read-only HTTPS GET (following up to 3 validated same-host redirects). Checks response headers, cookies and homepage markup; does not inspect server files, authenticate, submit forms, or prove the site secure.",
     }
-    item["last_scan_at"] = report["checked_at"]
+    item["status"] = "online" if (baseline["status_code"] or 0) < 500 else "degraded"
+    item["http_status"] = baseline["status_code"]
+    item["latency_ms"] = baseline["latency_ms"]
+    item["checked_at"] = checked_at
+    item["last_scan_at"] = checked_at
     item["last_scan_findings"] = findings
     return report
 
 
 @router.post("/{integration_id}/simulate")
 async def simulate_safe_probes(integration_id: str):
-    target, _host = _begin_assessment(integration_id, render_only=True)
+    target, _host = await _begin_assessment(integration_id, render_only=True)
     item = integrations[integration_id]
     xss_marker = "snt" + secrets.token_hex(5)
     sql_marker = "snt" + secrets.token_hex(5)

@@ -9,8 +9,9 @@ type Site = {
 };
 type Probe = { probe: string; status_code?: number | null; latency_ms?: number; result: string; severity: string; details: string };
 type Assessment = {
-  summary?: string; finding_count?: number; checks?: Array<{ title: string; result: string; severity: string; details: string }>;
+  summary?: string; finding_count?: number; checks?: Array<{ title: string; result: string; severity: string; details: string; recommendation?: string; fix?: string }>;
   probes?: Probe[]; requests_sent?: number; scope: string;
+  redirects?: string[];
   source?: string; scanned_files?: number;
   findings?: Array<{ severity: string; title: string; file: string; line: number; evidence: string; recommendation: string }>;
 };
@@ -71,8 +72,12 @@ export const IntegrationsModal: React.FC<{ isOpen: boolean; onClose: () => void 
     event.preventDefault(); setBusy(true); setError(''); setCredential(null);
     try {
       setLoadingMessage('Connecting to Sentinel…');
-      const result = await apiRequest('/api/integrations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, url }) });
+      let siteName = name.trim();
+      if (!siteName) { try { siteName = new URL(url).hostname; } catch { siteName = url; } }
+      const result = await apiRequest('/api/integrations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: siteName, url }) });
       setCredential({ id: result.id, key: result.integration_key }); setName(''); setUrl('https://'); await refresh();
+      setBusy(false);
+      await assess({ ...result, name: siteName, url } as Site, 'scan');
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not add site.'); }
     finally { setBusy(false); setLoadingMessage(''); }
   };
@@ -144,8 +149,8 @@ export const IntegrationsModal: React.FC<{ isOpen: boolean; onClose: () => void 
       <div className="p-5 space-y-5">
         <form onSubmit={add} className="rounded-lg border border-[#1E3A5F] bg-[#06101E] p-4 space-y-3">
           <h3 className="text-xs font-bold tracking-wider text-cyan-300 uppercase">Connect a website</h3>
-          <p className="text-xs text-slate-400">Add any public HTTPS storefront for a read-only review of its homepage response. For code-level checks, provide a public GitHub repository or an authorized ZIP archive. Safe probe simulation remains limited to your Render demos.</p>
-          <div className="grid sm:grid-cols-2 gap-3"><input required maxLength={80} placeholder="Store name" value={name} onChange={e => setName(e.target.value)} className="rounded bg-[#0A1929] border border-[#1E3A5F] px-3 py-2 text-sm text-white"/><input required type="url" placeholder="https://shop.example.com" value={url} onChange={e => setUrl(e.target.value)} className="rounded bg-[#0A1929] border border-[#1E3A5F] px-3 py-2 text-sm text-white"/></div>
+          <p className="text-xs text-slate-400">Adding a public HTTPS storefront starts a read-only homepage review automatically. For code-level checks, provide a public GitHub repository or an authorized ZIP archive. Safe probe simulation remains limited to your Render demos; only assess sites you own or have permission to review.</p>
+          <div className="grid sm:grid-cols-2 gap-3"><input maxLength={80} placeholder="Store name (optional)" value={name} onChange={e => setName(e.target.value)} className="rounded bg-[#0A1929] border border-[#1E3A5F] px-3 py-2 text-sm text-white"/><input required type="url" placeholder="https://shop.example.com" value={url} onChange={e => setUrl(e.target.value)} className="rounded bg-[#0A1929] border border-[#1E3A5F] px-3 py-2 text-sm text-white"/></div>
           {loadingMessage && busy && <p role="status" className="text-xs text-cyan-200">{loadingMessage} The first request can take longer while a free Render service starts.</p>}
           <button disabled={busy} className="inline-flex items-center gap-2 rounded bg-cyan-700 hover:bg-cyan-600 px-3 py-2 text-xs font-semibold disabled:opacity-50"><Plus size={15}/>{busy ? 'Connecting…' : 'Add website'}</button>
         </form>
@@ -183,7 +188,14 @@ export const IntegrationsModal: React.FC<{ isOpen: boolean; onClose: () => void 
           <p className="mt-2 text-[11px] text-slate-500">{site.last_event_at ? `Last telemetry: ${new Date(site.last_event_at).toLocaleString()}` : 'No telemetry received yet'}{site.checked_at ? ` · Checked ${new Date(site.checked_at).toLocaleString()}` : ''}{site.last_scan_at ? ` · Last scan: ${new Date(site.last_scan_at).toLocaleString()} (${site.last_scan_findings ?? 0} potential findings)` : ''}</p>
           {assessments[site.id] && <div className="mt-3 rounded border border-[#1E3A5F] bg-[#06101E] p-3 space-y-2">
             <p className="text-xs font-semibold text-white">{assessments[site.id].summary ? `Website review: ${assessments[site.id].summary} (${assessments[site.id].finding_count} potential findings)` : `Simulation: ${assessments[site.id].requests_sent} safe GET probes sent`}</p>
-            {assessments[site.id].checks?.map((check, index) => <div key={`check-${index}`} className="text-[11px] text-slate-300"><b className={check.severity === 'info' ? 'text-emerald-300' : 'text-amber-300'}>{check.title}: {check.result}</b><span className="block text-slate-400">{check.details}</span></div>)}
+            {assessments[site.id].checks?.filter(check => check.severity !== 'info').map((check, index) => <div key={`check-${index}`} className="space-y-1 rounded border border-[#292929] bg-black/20 p-2 text-[11px]">
+              <div className="flex items-center gap-2"><span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${check.severity === 'high' ? 'bg-rose-500/20 text-rose-300' : check.severity === 'medium' ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-500/20 text-slate-300'}`}>{check.severity}</span><b className="text-slate-100">{check.title}</b></div>
+              <p className="text-slate-400">{check.details}</p>
+              {check.recommendation && <p className="text-emerald-300"><b>How to fix:</b> {check.recommendation}</p>}
+              {check.fix && <div className="flex items-start gap-2"><pre className="min-w-0 flex-1 overflow-x-auto rounded bg-[#020a14] p-2 text-[10px] text-cyan-200">{check.fix}</pre><button onClick={() => navigator.clipboard?.writeText(check.fix || '')} className="inline-flex shrink-0 items-center gap-1 rounded border border-[#303030] px-2 py-1 text-[10px] text-zinc-400 hover:text-white"><Copy size={12}/>Copy</button></div>}
+            </div>)}
+            {assessments[site.id].checks && <p className="text-[11px] text-emerald-300">{assessments[site.id].checks!.filter(check => check.severity === 'info').length} informational observations hidden</p>}
+            {assessments[site.id].redirects && assessments[site.id].redirects!.length > 0 && <p className="text-[10px] text-zinc-500">Redirect path: {assessments[site.id].redirects!.join(' → ')}</p>}
             {assessments[site.id].probes?.map((probe, index) => <div key={`probe-${index}`} className="text-[11px] text-slate-300"><b className={probe.severity === 'info' ? 'text-emerald-300' : 'text-amber-300'}>{probe.probe}: {probe.result}</b><span className="block text-slate-400">HTTP {probe.status_code ?? '—'} · {probe.details}</span></div>)}
             <p className="text-[10px] text-slate-500">{assessments[site.id].scope}</p>
           </div>}
