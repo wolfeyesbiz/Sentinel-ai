@@ -1,4 +1,5 @@
 """Website integrations: passive HTTPS checks and authenticated telemetry intake."""
+import asyncio
 import ipaddress
 import secrets
 import socket
@@ -101,17 +102,17 @@ def _run_safe_probes(baseline_body: str, xss_marker: str, xss_response: dict, sq
             "probe": "HTML reflection canary",
             "status_code": xss_response["status_code"],
             "latency_ms": xss_response["latency_ms"],
-            "result": "potential_html_reflection" if reflected else "no_raw_reflection_observed",
-            "severity": "low" if reflected else "info",
-            "details": "A harmless custom HTML element was returned unescaped; review output encoding." if reflected else "The harmless HTML canary was not returned unescaped in the response.",
+            "result": "probe_timed_out" if xss_response["error"] else ("potential_html_reflection" if reflected else "no_raw_reflection_observed"),
+            "severity": "info" if xss_response["error"] else ("low" if reflected else "info"),
+            "details": f"The website did not finish this request ({xss_response['error']})." if xss_response["error"] else ("A harmless custom HTML element was returned unescaped; review output encoding." if reflected else "The harmless HTML canary was not returned unescaped in the response."),
         },
         {
             "probe": "SQL error disclosure canary",
             "status_code": sql_response["status_code"],
             "latency_ms": sql_response["latency_ms"],
-            "result": "database_error_signature" if db_error else ("server_error" if (sql_response["status_code"] or 0) >= 500 else "no_error_signature_observed"),
-            "severity": "medium" if db_error or (sql_response["status_code"] or 0) >= 500 else "info",
-            "details": f"Response contained a database error signature ({db_error})." if db_error else ("The probe received a server error; review application logs." if (sql_response["status_code"] or 0) >= 500 else "No common database error signature appeared in the bounded response sample."),
+            "result": "probe_timed_out" if sql_response["error"] else ("database_error_signature" if db_error else ("server_error" if (sql_response["status_code"] or 0) >= 500 else "no_error_signature_observed")),
+            "severity": "info" if sql_response["error"] else ("medium" if db_error or (sql_response["status_code"] or 0) >= 500 else "info"),
+            "details": f"The website did not finish this request ({sql_response['error']})." if sql_response["error"] else (f"Response contained a database error signature ({db_error})." if db_error else ("The probe received a server error; review application logs." if (sql_response["status_code"] or 0) >= 500 else "No common database error signature appeared in the bounded response sample.")),
         },
     ]
 
@@ -149,10 +150,13 @@ async def check_site(integration_id: str):
     _validated_url(item["url"])
     started = datetime.now(timezone.utc)
     try:
-        async with httpx.AsyncClient(timeout=8, follow_redirects=False) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(12.0, connect=6.0), follow_redirects=False) as client:
             response = await client.get(item["url"], headers={"User-Agent": "SentinelAI-AvailabilityCheck/1.0"})
         item["http_status"] = response.status_code
         item["status"] = "online" if response.status_code < 500 else "degraded"
+        item["latency_ms"] = round((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+    except httpx.TimeoutException:
+        item["status"], item["http_status"] = "timed_out", None
         item["latency_ms"] = round((datetime.now(timezone.utc) - started).total_seconds() * 1000)
     except httpx.HTTPError:
         item["status"], item["http_status"], item["latency_ms"] = "unreachable", None, None
@@ -164,7 +168,7 @@ async def check_site(integration_id: str):
 async def scan_site(integration_id: str):
     host = _begin_assessment(integration_id)
     item = integrations[integration_id]
-    async with httpx.AsyncClient(timeout=8, follow_redirects=False, max_redirects=0, headers={"User-Agent": "SentinelAI-SafeAssessment/1.0"}) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(12.0, connect=6.0), follow_redirects=False, max_redirects=0, headers={"User-Agent": "SentinelAI-SafeAssessment/1.0"}) as client:
         baseline = await _get_root(client, host)
         if baseline["error"]:
             raise HTTPException(502, f"The demo site could not be reached ({baseline['error']}).")
@@ -193,8 +197,10 @@ async def scan_site(integration_id: str):
         xss_marker = "snt" + secrets.token_hex(5)
         sql_marker = "snt" + secrets.token_hex(5)
         xss_value = f"<sentinel-probe>{xss_marker}</sentinel-probe>"
-        xss_response = await _get_root(client, host, xss_value)
-        sql_response = await _get_root(client, host, sql_marker + "'")
+        xss_response, sql_response = await asyncio.gather(
+            _get_root(client, host, xss_value),
+            _get_root(client, host, sql_marker + "'"),
+        )
         probes = _run_safe_probes(baseline["body"], xss_marker, xss_response, sql_response)
 
     for probe in probes:
@@ -226,10 +232,12 @@ async def simulate_safe_probes(integration_id: str):
     xss_marker = "snt" + secrets.token_hex(5)
     sql_marker = "snt" + secrets.token_hex(5)
     xss_value = f"<sentinel-probe>{xss_marker}</sentinel-probe>"
-    async with httpx.AsyncClient(timeout=8, follow_redirects=False, max_redirects=0, headers={"User-Agent": "SentinelAI-SafeProbe/1.0"}) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(12.0, connect=6.0), follow_redirects=False, max_redirects=0, headers={"User-Agent": "SentinelAI-SafeProbe/1.0"}) as client:
         baseline = await _get_root(client, host)
-        xss_response = await _get_root(client, host, xss_value)
-        sql_response = await _get_root(client, host, sql_marker + "'")
+        xss_response, sql_response = await asyncio.gather(
+            _get_root(client, host, xss_value),
+            _get_root(client, host, sql_marker + "'"),
+        )
     if baseline["error"]:
         raise HTTPException(502, f"The demo site could not be reached ({baseline['error']}).")
     probes = _run_safe_probes(baseline["body"], xss_marker, xss_response, sql_response)

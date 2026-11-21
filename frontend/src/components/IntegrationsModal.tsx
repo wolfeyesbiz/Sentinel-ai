@@ -13,6 +13,23 @@ type Assessment = {
   probes: Probe[]; requests_sent?: number; scope: string;
 };
 
+const apiRequest = async (path: string, init?: RequestInit) => {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 90_000);
+  try {
+    const response = await fetch(apiUrl(path), { ...init, signal: controller.signal });
+    const text = await response.text();
+    let data: any = {};
+    try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
+    if (!response.ok) throw new Error(data.detail || `Server returned ${response.status}.`);
+    return data;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('This request took too long. The free Render service may be waking up, or the website may not be responding. Wait a moment and try again.');
+    if (error instanceof TypeError) throw new Error('Could not reach Sentinel. Its Render service may be starting up; wait a few seconds and try again.');
+    throw error;
+  } finally { window.clearTimeout(timer); }
+};
+
 export const IntegrationsModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
   const [sites, setSites] = useState<Site[]>([]);
   const [name, setName] = useState('');
@@ -22,39 +39,40 @@ export const IntegrationsModal: React.FC<{ isOpen: boolean; onClose: () => void 
   const [credential, setCredential] = useState<{ id: string; key: string } | null>(null);
   const [assessments, setAssessments] = useState<Record<string, Assessment>>({});
   const [activeAction, setActiveAction] = useState<string | null>(null);
+  const [loadingMessage, setLoadingMessage] = useState('');
 
   const refresh = async () => {
-    const response = await fetch(apiUrl('/api/integrations'));
-    if (!response.ok) throw new Error('Could not load integrations.');
-    setSites(await response.json());
+    setSites(await apiRequest('/api/integrations'));
   };
-  useEffect(() => { if (isOpen) refresh().catch(() => setError('Could not load integrations.')); }, [isOpen]);
+  useEffect(() => {
+    if (!isOpen) return;
+    setLoadingMessage('Loading connected websites…');
+    refresh().catch(e => setError(e instanceof Error ? e.message : 'Could not load integrations.')).finally(() => setLoadingMessage(''));
+  }, [isOpen]);
   if (!isOpen) return null;
 
   const add = async (event: React.FormEvent) => {
     event.preventDefault(); setBusy(true); setError(''); setCredential(null);
     try {
-      const response = await fetch(apiUrl('/api/integrations'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, url }) });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || 'Could not add site.');
+      setLoadingMessage('Connecting to Sentinel…');
+      const result = await apiRequest('/api/integrations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, url }) });
       setCredential({ id: result.id, key: result.integration_key }); setName(''); setUrl('https://'); await refresh();
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not add site.'); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setLoadingMessage(''); }
   };
   const check = async (site: Site) => {
-    const response = await fetch(apiUrl(`/api/integrations/${site.id}/check`), { method: 'POST' });
-    if (!response.ok) throw new Error('Availability check failed.');
+    setActiveAction(`${site.id}:check`); setError(''); setLoadingMessage(`Checking ${site.name}…`);
+    try { await apiRequest(`/api/integrations/${site.id}/check`, { method: 'POST' }); }
+    finally { setActiveAction(null); setLoadingMessage(''); }
     await refresh();
   };
   const assess = async (site: Site, mode: 'scan' | 'simulate') => {
-    setActiveAction(`${site.id}:${mode}`); setError('');
+    setActiveAction(`${site.id}:${mode}`); setError(''); setLoadingMessage(`${mode === 'scan' ? 'Running security checks on' : 'Sending safe probes to'} ${site.name}…`);
     try {
-      const response = await fetch(apiUrl(`/api/integrations/${site.id}/${mode}`), { method: 'POST' });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || 'Assessment failed.');
+      const result = await apiRequest(`/api/integrations/${site.id}/${mode}`, { method: 'POST' });
       setAssessments(current => ({ ...current, [site.id]: result })); await refresh();
     } catch (e) { setError(e instanceof Error ? e.message : 'Assessment failed.'); }
-    finally { setActiveAction(null); }
+    finally { setActiveAction(null); setLoadingMessage(''); }
   };
   const remove = async (site: Site) => {
     const response = await fetch(apiUrl(`/api/integrations/${site.id}`), { method: 'DELETE' });
@@ -74,7 +92,8 @@ export const IntegrationsModal: React.FC<{ isOpen: boolean; onClose: () => void 
           <h3 className="text-xs font-bold tracking-wider text-cyan-300 uppercase">Connect a website</h3>
           <p className="text-xs text-slate-400">Add a public Render demo URL. A limited root-page scan checks security headers and uses two harmless GET canaries. The simulation sends three low-impact GET requests; it does not change site data or generate load.</p>
           <div className="grid sm:grid-cols-2 gap-3"><input required maxLength={80} placeholder="Demo store name" value={name} onChange={e => setName(e.target.value)} className="rounded bg-[#0A1929] border border-[#1E3A5F] px-3 py-2 text-sm text-white"/><input required type="url" placeholder="https://my-demo.onrender.com" value={url} onChange={e => setUrl(e.target.value)} className="rounded bg-[#0A1929] border border-[#1E3A5F] px-3 py-2 text-sm text-white"/></div>
-          {error && <p className="text-sm text-red-300">{error}</p>}
+          {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
+          {loadingMessage && busy && <p role="status" className="text-xs text-cyan-200">{loadingMessage} The first request can take longer while a free Render service starts.</p>}
           <button disabled={busy} className="inline-flex items-center gap-2 rounded bg-cyan-700 hover:bg-cyan-600 px-3 py-2 text-xs font-semibold disabled:opacity-50"><Plus size={15}/>{busy ? 'Connecting…' : 'Add website'}</button>
         </form>
         {credential && <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 space-y-3 text-xs">
@@ -89,10 +108,11 @@ export const IntegrationsModal: React.FC<{ isOpen: boolean; onClose: () => void 
 });`}</pre>
           <button onClick={() => navigator.clipboard?.writeText(credential.key)} className="inline-flex items-center gap-1 text-cyan-300"><Copy size={13}/>Copy key</button>
         </div>}
-        {error && <p className="text-sm text-red-300">{error}</p>}
+        {error && <p role="alert" className="rounded border border-red-900/70 bg-red-950/30 p-3 text-sm text-red-200">{error}</p>}
+        {loadingMessage && !busy && <p role="status" className="rounded border border-[#303030] bg-[#141414] p-3 text-xs text-zinc-300">{loadingMessage} The first request can take longer while a free Render service starts.</p>}
         <div className="space-y-2">{sites.length === 0 ? <div className="text-center text-sm text-slate-500 py-8">No websites connected yet.</div> : sites.map(site => <article key={site.id} className="rounded-lg border border-[#1E3A5F] bg-[#0F2137]/60 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><h3 className="font-semibold text-white">{site.name}</h3><a href={site.url} target="_blank" rel="noreferrer" className="text-xs text-cyan-300 break-all">{site.url}</a></div><div className="flex flex-wrap gap-2">
-            <button disabled={activeAction !== null} onClick={() => check(site).catch(e => setError(e instanceof Error ? e.message : 'Availability check failed.'))} className="inline-flex items-center gap-1 rounded border border-[#1E3A5F] px-2 py-1 text-xs text-slate-200 disabled:opacity-50"><RefreshCw size={13}/>Check</button>
+            <button disabled={activeAction !== null} onClick={() => check(site).catch(e => setError(e instanceof Error ? e.message : 'Availability check failed.'))} className="inline-flex items-center gap-1 rounded border border-[#1E3A5F] px-2 py-1 text-xs text-slate-200 disabled:opacity-50"><RefreshCw size={13}/>{activeAction === `${site.id}:check` ? 'Checking…' : 'Check'}</button>
             <button disabled={activeAction !== null} onClick={() => assess(site, 'scan')} className="inline-flex items-center gap-1 rounded border border-cyan-700 px-2 py-1 text-xs text-cyan-200 disabled:opacity-50"><ScanLine size={13}/>{activeAction === `${site.id}:scan` ? 'Scanning…' : 'Security scan'}</button>
             <button disabled={activeAction !== null} onClick={() => assess(site, 'simulate')} className="inline-flex items-center gap-1 rounded border border-amber-700 px-2 py-1 text-xs text-amber-200 disabled:opacity-50"><Zap size={13}/>{activeAction === `${site.id}:simulate` ? 'Probing…' : 'Simulate safe probes'}</button>
             <button onClick={() => remove(site).catch(e => setError(e instanceof Error ? e.message : 'Could not remove site.'))} aria-label={`Remove ${site.name}`} className="rounded border border-red-900 px-2 py-1 text-red-300"><Trash2 size={13}/></button>
