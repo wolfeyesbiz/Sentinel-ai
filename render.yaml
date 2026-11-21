@@ -32,9 +32,9 @@ services:
     buildCommand: npm install && npm run build
     staticPublishPath: dist
     envVars:
-      # Set this to your backend service URL after first deploy
+      # Assigned Render backend URL for the current Blueprint instance
       - key: VITE_API_BASE_URL
-        value: https://sentinel-ai-backend.onrender.com
+        value: https://sentinel-ai-backend-a1s0.onrender.com
     headers:
       - path: /*
         name: X-Frame-Options
