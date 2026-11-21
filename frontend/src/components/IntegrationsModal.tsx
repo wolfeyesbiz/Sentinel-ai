@@ -44,6 +44,18 @@ export const IntegrationsModal: React.FC<{ isOpen: boolean; onClose: () => void 
   const [loadingMessage, setLoadingMessage] = useState('');
   const [repositoryUrls, setRepositoryUrls] = useState<Record<string, string>>({});
   const [sourceArchives, setSourceArchives] = useState<Record<string, File | undefined>>({});
+  const [assessmentCooldowns, setAssessmentCooldowns] = useState<Record<string, number>>({});
+  const [clockNow, setClockNow] = useState(Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const cooldownKey = (site: Site) => {
+    try { return new URL(site.url).hostname; } catch { return site.id; }
+  };
+  const assessmentWait = (site: Site) => Math.max(0, Math.ceil(((assessmentCooldowns[cooldownKey(site)] || 0) - clockNow) / 1000));
 
   const refresh = async () => {
     setSites(await apiRequest('/api/integrations'));
@@ -75,20 +87,27 @@ export const IntegrationsModal: React.FC<{ isOpen: boolean; onClose: () => void 
     try {
       const result = await apiRequest(`/api/integrations/${site.id}/${mode}`, { method: 'POST' });
       setAssessments(current => ({ ...current, [site.id]: result }));
-      if (mode === 'scan') {
+      const until = Date.now() + 30_000;
+      setAssessmentCooldowns(current => ({ ...current, [cooldownKey(site)]: until }));
+      if (mode === 'simulate') await refresh();
+      const sample = mode === 'scan' ? result : result.probes?.find((probe: Probe) => probe.status_code != null);
+      const statusCode = mode === 'scan' ? result.http_status : sample?.status_code;
+      const latency = mode === 'scan' ? result.latency_ms : sample?.latency_ms;
+      if (statusCode != null) {
         setSites(current => current.map(entry => entry.id === site.id ? {
           ...entry,
-          status: (result.http_status ?? 0) < 500 ? 'online' : 'degraded',
-          http_status: result.http_status ?? undefined,
-          latency_ms: result.latency_ms ?? undefined,
-          checked_at: result.checked_at,
-          last_scan_at: result.checked_at,
-          last_scan_findings: result.finding_count,
+          status: statusCode < 500 ? 'online' : 'degraded',
+          http_status: statusCode,
+          latency_ms: latency ?? entry.latency_ms,
+          checked_at: mode === 'scan' ? result.checked_at : result.simulated_at,
+          ...(mode === 'scan' ? { last_scan_at: result.checked_at, last_scan_findings: result.finding_count } : {}),
         } : entry));
-      } else {
-        await refresh();
       }
-    } catch (e) { setError(e instanceof Error ? e.message : 'Assessment failed.'); }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Assessment failed.';
+      if (message.includes('assessed recently')) setAssessmentCooldowns(current => ({ ...current, [cooldownKey(site)]: Date.now() + 30_000 }));
+      setError(message);
+    }
     finally { setActiveAction(null); setLoadingMessage(''); }
   };
   const scanSource = async (site: Site, kind: 'github' | 'upload') => {
@@ -127,7 +146,6 @@ export const IntegrationsModal: React.FC<{ isOpen: boolean; onClose: () => void 
           <h3 className="text-xs font-bold tracking-wider text-cyan-300 uppercase">Connect a website</h3>
           <p className="text-xs text-slate-400">Add any public HTTPS storefront for a read-only review of its homepage response. For code-level checks, provide a public GitHub repository or an authorized ZIP archive. Safe probe simulation remains limited to your Render demos.</p>
           <div className="grid sm:grid-cols-2 gap-3"><input required maxLength={80} placeholder="Store name" value={name} onChange={e => setName(e.target.value)} className="rounded bg-[#0A1929] border border-[#1E3A5F] px-3 py-2 text-sm text-white"/><input required type="url" placeholder="https://shop.example.com" value={url} onChange={e => setUrl(e.target.value)} className="rounded bg-[#0A1929] border border-[#1E3A5F] px-3 py-2 text-sm text-white"/></div>
-          {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
           {loadingMessage && busy && <p role="status" className="text-xs text-cyan-200">{loadingMessage} The first request can take longer while a free Render service starts.</p>}
           <button disabled={busy} className="inline-flex items-center gap-2 rounded bg-cyan-700 hover:bg-cyan-600 px-3 py-2 text-xs font-semibold disabled:opacity-50"><Plus size={15}/>{busy ? 'Connecting…' : 'Add website'}</button>
         </form>
@@ -148,8 +166,8 @@ export const IntegrationsModal: React.FC<{ isOpen: boolean; onClose: () => void 
         <div className="space-y-2">{sites.length === 0 ? <div className="text-center text-sm text-slate-500 py-8">No websites connected yet.</div> : sites.map(site => <article key={site.id} className="rounded-lg border border-[#1E3A5F] bg-[#0F2137]/60 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><h3 className="font-semibold text-white">{site.name}</h3><a href={site.url} target="_blank" rel="noreferrer" className="text-xs text-cyan-300 break-all">{site.url}</a></div><div className="flex flex-wrap gap-2">
             <button disabled={activeAction !== null} onClick={() => check(site).catch(e => setError(e instanceof Error ? e.message : 'Availability check failed.'))} className="inline-flex items-center gap-1 rounded border border-[#1E3A5F] px-2 py-1 text-xs text-slate-200 disabled:opacity-50"><RefreshCw size={13}/>{activeAction === `${site.id}:check` ? 'Checking…' : 'Check'}</button>
-            <button disabled={activeAction !== null} onClick={() => assess(site, 'scan')} className="inline-flex items-center gap-1 rounded border border-cyan-700 px-2 py-1 text-xs text-cyan-200 disabled:opacity-50"><ScanLine size={13}/>{activeAction === `${site.id}:scan` ? 'Scanning…' : 'Website review'}</button>
-            <button disabled={activeAction !== null} onClick={() => assess(site, 'simulate')} className="inline-flex items-center gap-1 rounded border border-amber-700 px-2 py-1 text-xs text-amber-200 disabled:opacity-50"><Zap size={13}/>{activeAction === `${site.id}:simulate` ? 'Probing…' : 'Simulate safe probes'}</button>
+            <button disabled={activeAction !== null || assessmentWait(site) > 0} onClick={() => assess(site, 'scan')} className="inline-flex items-center gap-1 rounded border border-cyan-700 px-2 py-1 text-xs text-cyan-200 disabled:opacity-50"><ScanLine size={13}/>{activeAction === `${site.id}:scan` ? 'Scanning…' : assessmentWait(site) > 0 ? `Wait ${assessmentWait(site)}s` : 'Website review'}</button>
+            <button disabled={activeAction !== null || assessmentWait(site) > 0} onClick={() => assess(site, 'simulate')} className="inline-flex items-center gap-1 rounded border border-amber-700 px-2 py-1 text-xs text-amber-200 disabled:opacity-50"><Zap size={13}/>{activeAction === `${site.id}:simulate` ? 'Probing…' : assessmentWait(site) > 0 ? `Wait ${assessmentWait(site)}s` : 'Simulate safe probes'}</button>
             <button onClick={() => remove(site).catch(e => setError(e instanceof Error ? e.message : 'Could not remove site.'))} aria-label={`Remove ${site.name}`} className="rounded border border-red-900 px-2 py-1 text-red-300"><Trash2 size={13}/></button>
           </div></div>
           <div className="mt-4 rounded border border-[#303030] bg-black/20 p-3">
