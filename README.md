@@ -93,13 +93,13 @@ The dashboard implements the wireframe specification with dark mode styling:
 
 ### Website integrations
 
-Open **Integrations** in the dashboard and add a public HTTPS URL. **Check** performs a single availability request and reports HTTP status and latency; it does not inspect the site's incoming traffic or establish that the site is free of attacks.
+Open **Integrations** in the dashboard and add a public HTTPS URL. **Check** performs a single availability request. **Security scan** checks the root response's security headers and sends two harmless GET canaries for unescaped HTML reflection and database error disclosure. **Simulate safe probes** sends three sequential GET requests to the root page (baseline, inert custom HTML marker, and quote-only SQL marker). Assessments are restricted to registered `*.onrender.com` sites, do not follow redirects, and never submit writes, uploads, logins, or load tests. Results are limited indicators, not a full vulnerability assessment or proof of safety; they do not block traffic on the target.
 
 To detect requests against an integrated site, instrument that demo application to forward request metadata to `POST /api/integrations/{integration_id}/events` with `Authorization: Bearer <integration_key>`. The key is shown once when the integration is created. Forward only method, path, source IP, user agent, and sanitized query/body data. Do not forward credentials, cookies, tokens, or payment data. Sentinel runs its existing detectors against forwarded events and records resulting alerts. Sentinel reports findings; it does not block requests on a separately hosted site.
 
 Integration records and keys currently live in backend memory and are lost when the service restarts or redeploys. Add persistent storage and access control before using this with anything beyond isolated demo sites.
 
-The built-in attack simulator creates synthetic requests inside Sentinel to demonstrate its detector. It never sends attack traffic to the configured website.
+The built-in attack simulator still creates synthetic requests inside Sentinel to demonstrate its detector. The website integration's safe probes are separate and report the target's HTTP response without claiming Sentinel intercepted or mitigated the request.
 
 ### Option 1: Native Single-Command Run
 ```powershell
