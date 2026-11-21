@@ -22,3 +22,12 @@ export const WS_BASE: string = API_BASE
 export function apiUrl(path: string): string {
   return `${API_BASE}${path}`;
 }
+
+/** Dashboard API requests need the browser's secure, HttpOnly session cookie. */
+export function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  let token: string | null = null;
+  try { token = typeof window === 'undefined' ? null : window.sessionStorage.getItem('sentinel_session'); } catch { token = null; }
+  const headers = new Headers(init.headers);
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  return fetch(input, { ...init, headers, credentials: 'include' });
+}

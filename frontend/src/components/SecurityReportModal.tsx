@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, FileText, Download, Printer, ShieldCheck, CheckCircle } from 'lucide-react';
-import { apiUrl } from '../api';
+import { apiFetch, apiUrl } from '../api';
 
 interface SecurityReportModalProps {
   isOpen: boolean;
@@ -23,7 +23,7 @@ export const SecurityReportModal: React.FC<SecurityReportModalProps> = ({
   const fetchReport = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(apiUrl('/api/security/report'));
+      const res = await apiFetch(apiUrl('/api/security/report'));
       const data = await res.json();
       setReport(data);
     } catch (e) {

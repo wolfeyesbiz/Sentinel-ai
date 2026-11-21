@@ -5,11 +5,14 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from app.config import settings
 from app.storage.db import db
+from app.auth import get_session_user, initialize_auth
+from app.routers.auth import COOKIE_NAME, router as auth_router
 from app.storage.memory_store import memory_store
 from app.models.schemas import AlertItem, SeverityLevel, ThreatType, ThreatStatus
 from app.remediation.knowledge_base import get_remediation_guide
@@ -131,6 +134,7 @@ def seed_initial_demo_alerts():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup:
+    initialize_auth()
     seed_initial_demo_alerts()
     task = asyncio.create_task(background_metrics_stream())
     yield
@@ -145,7 +149,7 @@ app = FastAPI(
 )
 
 # CORS — allow local dev + Render-hosted frontend (and any custom domain via env var)
-_frontend_origin = os.environ.get("FRONTEND_URL", "https://sentinel-ai-frontend.onrender.com")
+_frontend_origin = os.environ.get("FRONTEND_URL", "https://sentinel-ai-frontend-a1s0.onrender.com")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -153,7 +157,6 @@ app.add_middleware(
         "http://localhost:5173",
         "http://localhost:8000",
         _frontend_origin,
-        "*",          # Keep wildcard so any preview URL works; tighten in production if needed
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -167,11 +170,31 @@ app.include_router(security_router, prefix=settings.API_PREFIX)
 app.include_router(traffic_router, prefix=settings.API_PREFIX)
 app.include_router(simulator_router, prefix=settings.API_PREFIX)
 app.include_router(integrations_router, prefix=settings.API_PREFIX)
+app.include_router(auth_router, prefix=settings.API_PREFIX)
+
+
+@app.middleware("http")
+async def require_dashboard_login(request, call_next):
+    path = request.url.path
+    is_auth_route = path.startswith(f"{settings.API_PREFIX}/auth/")
+    is_site_telemetry = path.startswith(f"{settings.API_PREFIX}/integrations/") and path.endswith("/events") and request.method == "POST"
+    if request.method != "OPTIONS" and path.startswith(f"{settings.API_PREFIX}/") and not is_auth_route and not is_site_telemetry:
+        authorization = request.headers.get("authorization", "")
+        token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else request.cookies.get(COOKIE_NAME)
+        if not get_session_user(token):
+            return JSONResponse({"detail": "Sign in to access Sentinel AI."}, status_code=401)
+    return await call_next(request)
 
 # Real-time WebSocket connection
 @app.websocket("/ws/stream")
 async def websocket_stream_endpoint(websocket: WebSocket):
-    await memory_store.connect_ws(websocket)
+    offered_protocols = [item.strip() for item in websocket.headers.get("sec-websocket-protocol", "").split(",")]
+    auth_protocol = next((item for item in offered_protocols if item.startswith("sentinel-auth-")), None)
+    token = auth_protocol.removeprefix("sentinel-auth-") if auth_protocol else websocket.cookies.get(COOKIE_NAME)
+    if not get_session_user(token):
+        await websocket.close(code=4401, reason="Sign in required")
+        return
+    await memory_store.connect_ws(websocket, subprotocol=auth_protocol)
     try:
         # Send initial snapshot immediately upon connection
         metrics = memory_store.get_live_metrics()

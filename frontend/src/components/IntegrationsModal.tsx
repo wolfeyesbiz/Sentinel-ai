@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Activity, Copy, Plus, RefreshCw, ScanLine, Trash2, X, Zap } from 'lucide-react';
-import { apiUrl } from '../api';
+import { apiFetch, apiUrl } from '../api';
 
 type Site = {
   id: string; name: string; url: string; status: string; checked_at?: string;
@@ -17,7 +17,7 @@ const apiRequest = async (path: string, init?: RequestInit) => {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), 90_000);
   try {
-    const response = await fetch(apiUrl(path), { ...init, signal: controller.signal });
+    const response = await apiFetch(apiUrl(path), { ...init, signal: controller.signal });
     const text = await response.text();
     let data: any = {};
     try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
@@ -75,7 +75,7 @@ export const IntegrationsModal: React.FC<{ isOpen: boolean; onClose: () => void 
     finally { setActiveAction(null); setLoadingMessage(''); }
   };
   const remove = async (site: Site) => {
-    const response = await fetch(apiUrl(`/api/integrations/${site.id}`), { method: 'DELETE' });
+    const response = await apiFetch(apiUrl(`/api/integrations/${site.id}`), { method: 'DELETE' });
     if (!response.ok) throw new Error('Could not remove site.');
     setAssessments(current => { const next = { ...current }; delete next[site.id]; return next; });
     await refresh();

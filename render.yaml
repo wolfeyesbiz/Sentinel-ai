@@ -13,6 +13,8 @@ services:
     envVars:
       - key: ENVIRONMENT
         value: production
+      - key: FRONTEND_URL
+        value: https://sentinel-ai-frontend-a1s0.onrender.com
       - key: ANOMALY_THRESHOLD
         value: "0.70"
       - key: AUTO_BLOCK_CRITICAL

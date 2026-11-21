@@ -36,8 +36,8 @@ class MemoryStore:
         self.last_network_check = time.time()
         self.current_network_mbps = 2.4
 
-    async def connect_ws(self, websocket: WebSocket):
-        await websocket.accept()
+    async def connect_ws(self, websocket: WebSocket, subprotocol: Optional[str] = None):
+        await websocket.accept(subprotocol=subprotocol)
         self.active_websockets.add(websocket)
 
     def disconnect_ws(self, websocket: WebSocket):

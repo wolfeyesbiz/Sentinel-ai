@@ -91,6 +91,17 @@ The dashboard implements the wireframe specification with dark mode styling:
 
 ## 🚀 Quickstart & Execution
 
+### Dashboard accounts
+
+The dashboard has email/password sign-in, account creation, and sign-out. Passwords are stored as salted PBKDF2 hashes. Authenticated sessions use random server-checked tokens in browser session storage and an HttpOnly cookie fallback. Two public demo accounts are seeded automatically:
+
+| Email | Password |
+| --- | --- |
+| `demo@sentinel.local` | `SentinelDemo2026!` |
+| `demo2@sentinel.local` | `SentinelGuest2026!` |
+
+These accounts share the same demo dashboard data. Do not enter personal or sensitive information. On Render, the database is currently configured at `/tmp/sentinel.db`; account records and sessions may be lost when the service is redeployed or its ephemeral storage resets. Use persistent managed storage and user-specific data access before treating this as production authentication.
+
 ### Website integrations
 
 Open **Integrations** in the dashboard and add a public HTTPS URL. **Check** performs a single availability request. **Security scan** checks the root response's security headers and sends two harmless GET canaries for unescaped HTML reflection and database error disclosure. **Simulate safe probes** sends three sequential GET requests to the root page (baseline, inert custom HTML marker, and quote-only SQL marker). Assessments are restricted to registered `*.onrender.com` sites, do not follow redirects, and never submit writes, uploads, logins, or load tests. Results are limited indicators, not a full vulnerability assessment or proof of safety; they do not block traffic on the target.

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Lock, Unlock, ShieldAlert, Plus, ShieldCheck } from 'lucide-react';
 import { BlockedIPItem, WafRule } from '../types';
-import { apiUrl } from '../api';
+import { apiFetch, apiUrl } from '../api';
 
 interface FirewallModalProps {
   isOpen: boolean;
@@ -30,11 +30,11 @@ export const FirewallModal: React.FC<FirewallModalProps> = ({
 
   const loadData = async () => {
     try {
-      const ipRes = await fetch(apiUrl('/api/security/blocked-ips'));
+      const ipRes = await apiFetch(apiUrl('/api/security/blocked-ips'));
       const ipData = await ipRes.json();
       setBlockedList(ipData);
 
-      const wafRes = await fetch(apiUrl('/api/security/rules'));
+      const wafRes = await apiFetch(apiUrl('/api/security/rules'));
       const wafData = await wafRes.json();
       setWafRules(wafData);
     } catch (e) {
@@ -47,7 +47,7 @@ export const FirewallModal: React.FC<FirewallModalProps> = ({
     if (!newIP) return;
     setIsLoading(true);
     try {
-      await fetch(apiUrl('/api/security/block-ip'), {
+      await apiFetch(apiUrl('/api/security/block-ip'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -69,7 +69,7 @@ export const FirewallModal: React.FC<FirewallModalProps> = ({
 
   const handleUnblock = async (ip: string) => {
     try {
-      await fetch(apiUrl('/api/security/unblock-ip'), {
+      await apiFetch(apiUrl('/api/security/unblock-ip'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ip_address: ip })

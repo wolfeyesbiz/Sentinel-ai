@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X, Zap, ShieldAlert, CheckCircle2, Play, Terminal } from 'lucide-react';
 import { soundAlert } from '../SoundAlert';
-import { apiUrl } from '../api';
+import { apiFetch, apiUrl } from '../api';
 
 interface AttackScenario {
   threat_type: string;
@@ -116,7 +116,7 @@ export const AttackSimulatorModal: React.FC<AttackSimulatorModalProps> = ({
     setIsSimulating(true);
     setLastResult(null);
     try {
-      const resp = await fetch(apiUrl('/api/simulate-attack'), {
+      const resp = await apiFetch(apiUrl('/api/simulate-attack'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

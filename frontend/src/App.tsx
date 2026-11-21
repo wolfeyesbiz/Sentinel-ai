@@ -10,12 +10,15 @@ import { FirewallModal } from './components/FirewallModal';
 import { SecurityReportModal } from './components/SecurityReportModal';
 import { LiveTrafficDrawer } from './components/LiveTrafficDrawer';
 import { IntegrationsModal } from './components/IntegrationsModal';
+import { AuthScreen } from './components/AuthScreen';
 import { soundAlert } from './SoundAlert';
 import { AlertItem, SystemMetrics, TrafficPacket } from './types';
-import { Shield, LayoutDashboard, Link2, Radio, Globe, Lock, FileText, Map, Volume2, Menu, X } from 'lucide-react';
-import { apiUrl, WS_BASE } from './api';
+import { Shield, LayoutDashboard, Link2, Radio, Globe, Lock, FileText, Menu, X, LogOut } from 'lucide-react';
+import { apiFetch, apiUrl, WS_BASE } from './api';
 
 export const App: React.FC = () => {
+  const [user, setUser] = useState<{ id: string; name: string; email: string } | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [trafficPackets, setTrafficPackets] = useState<TrafficPacket[]>([]);
@@ -36,6 +39,12 @@ export const App: React.FC = () => {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
+  useEffect(() => {
+    apiFetch(apiUrl('/api/auth/me')).then(async response => {
+      if (response.ok) setUser((await response.json()).user);
+    }).catch(() => {}).finally(() => setAuthLoading(false));
+  }, []);
+
   // Ticking timer for "Last Scan: Xs ago"
   useEffect(() => {
     const timer = setInterval(() => {
@@ -47,7 +56,7 @@ export const App: React.FC = () => {
   // Initial REST fetch
   const fetchOverview = async () => {
     try {
-      const ovRes = await fetch(apiUrl('/api/dashboard/overview'));
+      const ovRes = await apiFetch(apiUrl('/api/dashboard/overview'));
       const ovData = await ovRes.json();
       setMetrics({
         cpu_usage: ovData.system_metrics.cpu_usage,
@@ -62,13 +71,13 @@ export const App: React.FC = () => {
         timestamp: new Date().toISOString()
       });
 
-      const alRes = await fetch(apiUrl('/api/alerts/recent?limit=50&severity=all'));
+      const alRes = await apiFetch(apiUrl('/api/alerts/recent?limit=50&severity=all'));
       const alData = await alRes.json();
       if (alData.alerts) {
         setAlerts(alData.alerts);
       }
 
-      const tfRes = await fetch(apiUrl('/api/traffic/recent'));
+      const tfRes = await apiFetch(apiUrl('/api/traffic/recent'));
       const tfData = await tfRes.json();
       if (Array.isArray(tfData)) {
         setTrafficPackets(tfData);
@@ -80,14 +89,17 @@ export const App: React.FC = () => {
 
   // WebSocket Connection
   useEffect(() => {
+    if (!user) return;
     fetchOverview();
 
-    const wsUrl = `${WS_BASE}/ws/stream`;
+    const sessionToken = window.sessionStorage.getItem('sentinel_session');
 
     let reconnectTimer: any;
 
     const connectWS = () => {
-      const ws = new WebSocket(wsUrl);
+      const ws = sessionToken
+        ? new WebSocket(`${WS_BASE}/ws/stream`, [`sentinel-auth-${sessionToken}`])
+        : new WebSocket(`${WS_BASE}/ws/stream`);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -144,7 +156,16 @@ export const App: React.FC = () => {
         wsRef.current.close();
       }
     };
-  }, []);
+  }, [user]);
+
+  const handleLogout = async () => {
+    try { await apiFetch(apiUrl('/api/auth/logout'), { method: 'POST' }); } catch { /* Clear the dashboard locally even if Render is offline. */ }
+    window.sessionStorage.removeItem('sentinel_session');
+    setUser(null);
+    setMetrics(null);
+    setAlerts([]);
+    setTrafficPackets([]);
+  };
 
   const handleToggleSound = () => {
     const newState = soundAlert.toggle();
@@ -152,7 +173,7 @@ export const App: React.FC = () => {
   };
 
   const handleBlockIP = async (ip: string, reason: string) => {
-    await fetch(apiUrl('/api/security/block-ip'), {
+    await apiFetch(apiUrl('/api/security/block-ip'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ip_address: ip, duration_hours: 0, reason }) // permanent
@@ -161,13 +182,16 @@ export const App: React.FC = () => {
   };
 
   const handleUnblockIP = async (ip: string) => {
-    await fetch(apiUrl('/api/security/unblock-ip'), {
+    await apiFetch(apiUrl('/api/security/unblock-ip'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ip_address: ip })
     });
     await fetchOverview();
   };
+
+  if (authLoading) return <div className="flex min-h-screen items-center justify-center bg-[#090909] text-sm text-zinc-500">Loading Sentinel AI…</div>;
+  if (!user) return <AuthScreen onAuthenticated={setUser} />;
 
   return (
     <div className="min-h-screen bg-[#090909] text-zinc-100 selection:bg-emerald-500 selection:text-black">
@@ -183,7 +207,7 @@ export const App: React.FC = () => {
           <button onClick={() => {setIsFirewallOpen(true);setMobileNavOpen(false)}} className="side-link"><Lock size={16}/> Firewall</button>
           <button onClick={() => {setIsReportOpen(true);setMobileNavOpen(false)}} className="side-link"><FileText size={16}/> Security reports</button>
         </div>
-        <div className="mt-auto border-t border-[#222] p-4"><div className="flex items-center gap-3"><span className={`h-2 w-2 rounded-full ${wsConnected ? 'bg-emerald-500' : 'bg-zinc-600'}`}/><div><div className="text-xs text-zinc-300">Monitoring {wsConnected ? 'active' : 'connecting'}</div><div className="mt-0.5 text-[10px] text-zinc-600">Sentinel system status</div></div></div></div>
+        <div className="mt-auto border-t border-[#222] p-4"><div className="mb-4 flex items-center gap-3"><span className="grid h-8 w-8 place-items-center rounded-full bg-emerald-500/15 text-xs font-semibold text-emerald-400">{user.name.slice(0, 1).toUpperCase()}</span><div className="min-w-0"><div className="truncate text-xs text-zinc-200">{user.name}</div><div className="truncate text-[10px] text-zinc-600">{user.email}</div></div><button onClick={handleLogout} className="ml-auto rounded p-1.5 text-zinc-500 hover:bg-white/5 hover:text-white" title="Sign out" aria-label="Sign out"><LogOut size={15}/></button></div><div className="flex items-center gap-3"><span className={`h-2 w-2 rounded-full ${wsConnected ? 'bg-emerald-500' : 'bg-zinc-600'}`}/><div><div className="text-xs text-zinc-300">Monitoring {wsConnected ? 'active' : 'connecting'}</div><div className="mt-0.5 text-[10px] text-zinc-600">Sentinel system status</div></div></div></div>
       </aside>
       {mobileNavOpen && <button className="fixed inset-0 z-30 bg-black/60 md:hidden" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)}/>}
       <div className="min-h-screen md:ml-[228px]">
