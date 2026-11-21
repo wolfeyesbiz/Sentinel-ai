@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  sentinel-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sentinel-ai-core
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - ADMIN_EMAIL=security-admin@yourstore.com
+      - ANOMALY_THRESHOLD=0.70
+      - AUTO_BLOCK_CRITICAL=true
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://sentinel_user:sentinel_password@postgres:5432/sentinel_db
+    depends_on:
+      - redis
+      - postgres
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    container_name: sentinel-redis
+    ports:
+      - "6379:6379"
+    restart: always
+    volumes:
+      - redis_data:/data
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: sentinel-postgres
+    environment:
+      POSTGRES_USER: sentinel_user
+      POSTGRES_PASSWORD: sentinel_password
+      POSTGRES_DB: sentinel_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    restart: always
+
+volumes:
+  redis_data:
+  pg_data:

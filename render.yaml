@@ -1,0 +1,49 @@
+services:
+  # ──────────────────────────────────────────────────────────────────
+  # Backend — FastAPI Web Service (Python)
+  # ──────────────────────────────────────────────────────────────────
+  - type: web
+    name: sentinel-ai-backend
+    runtime: python
+    region: oregon
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r ../requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: ANOMALY_THRESHOLD
+        value: "0.70"
+      - key: AUTO_BLOCK_CRITICAL
+        value: "true"
+      - key: DB_PATH
+        value: /tmp/sentinel.db
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
+  # ──────────────────────────────────────────────────────────────────
+  # Frontend — React + Vite Static Site
+  # ──────────────────────────────────────────────────────────────────
+  - type: static
+    name: sentinel-ai-frontend
+    region: oregon
+    plan: free
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      # Set this to your backend service URL after first deploy
+      - key: VITE_API_BASE_URL
+        value: https://sentinel-ai-backend.onrender.com
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
