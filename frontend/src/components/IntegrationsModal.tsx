@@ -74,7 +74,20 @@ export const IntegrationsModal: React.FC<{ isOpen: boolean; onClose: () => void 
     setActiveAction(`${site.id}:${mode}`); setError(''); setLoadingMessage(`${mode === 'scan' ? 'Running security checks on' : 'Sending safe probes to'} ${site.name}…`);
     try {
       const result = await apiRequest(`/api/integrations/${site.id}/${mode}`, { method: 'POST' });
-      setAssessments(current => ({ ...current, [site.id]: result })); await refresh();
+      setAssessments(current => ({ ...current, [site.id]: result }));
+      if (mode === 'scan') {
+        setSites(current => current.map(entry => entry.id === site.id ? {
+          ...entry,
+          status: (result.http_status ?? 0) < 500 ? 'online' : 'degraded',
+          http_status: result.http_status ?? undefined,
+          latency_ms: result.latency_ms ?? undefined,
+          checked_at: result.checked_at,
+          last_scan_at: result.checked_at,
+          last_scan_findings: result.finding_count,
+        } : entry));
+      } else {
+        await refresh();
+      }
     } catch (e) { setError(e instanceof Error ? e.message : 'Assessment failed.'); }
     finally { setActiveAction(null); setLoadingMessage(''); }
   };
