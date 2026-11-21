@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { ThreatLevelBanner } from './components/ThreatLevelBanner';
+import { DashboardWorkbench } from './components/DashboardWorkbench';
 import { MetricCards } from './components/MetricCards';
 import { RecentActivityTable } from './components/RecentActivityTable';
 import { ThreatDetailModal } from './components/ThreatDetailModal';
@@ -13,7 +14,7 @@ import { IntegrationsModal } from './components/IntegrationsModal';
 import { AuthScreen } from './components/AuthScreen';
 import { soundAlert } from './SoundAlert';
 import { AlertItem, SystemMetrics, TrafficPacket } from './types';
-import { Shield, LayoutDashboard, Link2, Radio, Globe, Lock, FileText, Menu, X, LogOut } from 'lucide-react';
+import { Shield, LayoutDashboard, Link2, Radio, Globe, Lock, FileText, X, LogOut, Zap } from 'lucide-react';
 import { apiFetch, apiUrl, WS_BASE } from './api';
 
 export const App: React.FC = () => {
@@ -48,7 +49,7 @@ export const App: React.FC = () => {
   // Ticking timer for "Last Scan: Xs ago"
   useEffect(() => {
     const timer = setInterval(() => {
-      setLastScanSeconds(prev => (prev >= 60 ? 1 : prev + 1));
+      setLastScanSeconds(prev => Math.min(60, prev + 1));
     }, 1000);
     return () => clearInterval(timer);
   }, []);
@@ -110,6 +111,7 @@ export const App: React.FC = () => {
         try {
           const data = JSON.parse(event.data);
           if (data.type === 'INITIAL_SNAPSHOT') {
+            setLastScanSeconds(1);
             if (data.metrics) setMetrics(data.metrics);
             if (data.recent_alerts) setAlerts(data.recent_alerts);
             if (data.recent_traffic) setTrafficPackets(data.recent_traffic);
@@ -190,106 +192,82 @@ export const App: React.FC = () => {
     await fetchOverview();
   };
 
-  if (authLoading) return <div className="flex min-h-screen items-center justify-center bg-[#090909] text-sm text-zinc-500">Loading Sentinel AI…</div>;
+  if (authLoading) return <div className="auth-loading">Loading Sentinel AI…</div>;
   if (!user) return <AuthScreen onAuthenticated={setUser} />;
 
   return (
-    <div className="min-h-screen bg-[#090909] text-zinc-100 selection:bg-emerald-500 selection:text-black">
-      <aside className={`fixed inset-y-0 left-0 z-40 flex w-[228px] flex-col border-r border-[#222] bg-[#070707] transition-transform md:translate-x-0 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="flex h-[68px] items-center gap-3 border-b border-[#222] px-5"><span className="rounded-lg bg-emerald-500/10 p-2 text-emerald-500"><Shield size={18}/></span><div><div className="text-sm font-semibold">Sentinel AI</div><div className="text-[10px] tracking-wide text-zinc-500">SECURITY CONSOLE</div></div><button className="ml-auto text-zinc-500 md:hidden" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation"><X size={18}/></button></div>
-        <div className="px-3 pt-6"><div className="px-2 pb-2 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-600">Overview</div><button onClick={() => setMobileNavOpen(false)} className="flex w-full items-center gap-3 rounded-lg bg-emerald-500/10 px-3 py-2.5 text-left text-sm text-emerald-400"><LayoutDashboard size={16}/> Dashboard</button></div>
-        <div className="px-3 pt-7"><div className="px-2 pb-2 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-600">Monitor</div>
-          <button onClick={() => {setIsIntegrationsOpen(true);setMobileNavOpen(false)}} className="side-link"><Link2 size={16}/> Websites</button>
-          <button onClick={() => {setIsTrafficOpen(true);setMobileNavOpen(false)}} className="side-link"><Radio size={16}/> Live traffic</button>
-          <button onClick={() => {setIsMapOpen(true);setMobileNavOpen(false)}} className="side-link"><Globe size={16}/> Threat map</button>
+    <div className="sentinel-app">
+      <aside className={`sentinel-sidebar${mobileNavOpen ? ' sidebar--open' : ''}`} aria-label="Main navigation">
+        <div className="sidebar-brand">
+          <span className="brand-mark"><Shield size={19} /></span>
+          <div><div className="brand-title">Sentinel AI</div><div className="brand-subtitle">Security console</div></div>
+          <button className="sidebar-close quiet-button" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation"><X size={18} /></button>
         </div>
-        <div className="px-3 pt-7"><div className="px-2 pb-2 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-600">Response</div>
-          <button onClick={() => {setIsFirewallOpen(true);setMobileNavOpen(false)}} className="side-link"><Lock size={16}/> Firewall</button>
-          <button onClick={() => {setIsReportOpen(true);setMobileNavOpen(false)}} className="side-link"><FileText size={16}/> Security reports</button>
+        <div className="sidebar-group">
+          <div className="sidebar-group-title">Overview</div>
+          <button onClick={() => setMobileNavOpen(false)} className="side-link side-link--current" aria-current="page"><LayoutDashboard size={16} /> Dashboard</button>
         </div>
-        <div className="mt-auto border-t border-[#222] p-4"><div className="mb-4 flex items-center gap-3"><span className="grid h-8 w-8 place-items-center rounded-full bg-emerald-500/15 text-xs font-semibold text-emerald-400">{user.name.slice(0, 1).toUpperCase()}</span><div className="min-w-0"><div className="truncate text-xs text-zinc-200">{user.name}</div><div className="truncate text-[10px] text-zinc-600">{user.email}</div></div><button onClick={handleLogout} className="ml-auto rounded p-1.5 text-zinc-500 hover:bg-white/5 hover:text-white" title="Sign out" aria-label="Sign out"><LogOut size={15}/></button></div><div className="flex items-center gap-3"><span className={`h-2 w-2 rounded-full ${wsConnected ? 'bg-emerald-500' : 'bg-zinc-600'}`}/><div><div className="text-xs text-zinc-300">Monitoring {wsConnected ? 'active' : 'connecting'}</div><div className="mt-0.5 text-[10px] text-zinc-600">Sentinel system status</div></div></div></div>
+        <div className="sidebar-group">
+          <div className="sidebar-group-title">Monitor</div>
+          <button onClick={() => {setIsIntegrationsOpen(true);setMobileNavOpen(false)}} className="side-link"><Link2 size={16} /> Websites</button>
+          <button onClick={() => {setIsTrafficOpen(true);setMobileNavOpen(false)}} className="side-link"><Radio size={16} /> Live traffic</button>
+          <button onClick={() => {setIsMapOpen(true);setMobileNavOpen(false)}} className="side-link"><Globe size={16} /> Threat map</button>
+        </div>
+        <div className="sidebar-group">
+          <div className="sidebar-group-title">Response</div>
+          <button onClick={() => {setIsFirewallOpen(true);setMobileNavOpen(false)}} className="side-link"><Lock size={16} /> Firewall</button>
+          <button onClick={() => {setIsReportOpen(true);setMobileNavOpen(false)}} className="side-link"><FileText size={16} /> Security reports</button>
+        </div>
+        <div className="sidebar-account">
+          <div className="account-row">
+            <span className="account-monogram">{user.name.slice(0, 1).toUpperCase()}</span>
+            <div className="account-copy"><div className="account-name">{user.name}</div><div className="account-email">{user.email}</div></div>
+            <button onClick={handleLogout} className="quiet-button" title="Sign out" aria-label="Sign out"><LogOut size={15} /></button>
+          </div>
+          <div className="monitor-state"><strong>Monitoring</strong> {wsConnected ? 'active' : 'connecting'}</div>
+        </div>
       </aside>
-      {mobileNavOpen && <button className="fixed inset-0 z-30 bg-black/60 md:hidden" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)}/>}
-      <div className="min-h-screen md:ml-[228px]">
-      <Navbar
-        systemStatus={metrics?.system_status || 'PROTECTED'}
-        lastScanSeconds={lastScanSeconds}
-        wsConnected={wsConnected}
-        soundEnabled={soundEnabled}
-        onToggleSound={handleToggleSound}
-        onOpenSimulator={() => setIsSimulatorOpen(true)}
-        onOpenMap={() => setIsMapOpen(true)}
-        onOpenFirewall={() => setIsFirewallOpen(true)}
-        onOpenReport={() => setIsReportOpen(true)}
-        onOpenTraffic={() => setIsTrafficOpen(true)}
-        onOpenIntegrations={() => setIsIntegrationsOpen(true)}
-        onOpenMenu={() => setMobileNavOpen(true)}
-      />
-
-      {/* Main Dashboard Container */}
-      <main className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-8">
-        <div className="mb-5"><p className="text-xs text-zinc-500">Security overview</p><h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-100">Dashboard</h1><p className="mt-1 text-sm text-zinc-500">Monitor activity and review your connected websites.</p></div>
-        {/* Threat Level Banner */}
-        <ThreatLevelBanner
-          threatLevel={metrics?.threat_level || 'LOW'}
-          activeThreats={metrics?.active_threats || 0}
-          blockedToday={metrics?.blocked_today || 0}
-          riskScore={metrics?.risk_score || 0.12}
+      {mobileNavOpen && <button className="sidebar-backdrop" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />}
+      <div className="sentinel-content">
+        <Navbar
+          systemStatus={metrics?.system_status || 'CONNECTING'}
+          lastScanSeconds={lastScanSeconds}
+          wsConnected={wsConnected}
+          soundEnabled={soundEnabled}
+          onToggleSound={handleToggleSound}
+          onOpenSimulator={() => setIsSimulatorOpen(true)}
+          onOpenMap={() => setIsMapOpen(true)}
+          onOpenFirewall={() => setIsFirewallOpen(true)}
+          onOpenReport={() => setIsReportOpen(true)}
+          onOpenTraffic={() => setIsTrafficOpen(true)}
+          onOpenIntegrations={() => setIsIntegrationsOpen(true)}
+          onOpenMenu={() => setMobileNavOpen(true)}
         />
-
-        {/* System Resource Gauges */}
-        <MetricCards metrics={metrics} />
-
-        {/* Live Recent Activity Table */}
-        <RecentActivityTable
-          alerts={alerts}
-          onSelectAlert={(alert) => setSelectedAlert(alert)}
-        />
-
-      </main>
-
-      {/* Threat Detail Modal */}
-      <ThreatDetailModal
-        alert={selectedAlert}
-        onClose={() => setSelectedAlert(null)}
-        onBlockIP={handleBlockIP}
-        onUnblockIP={handleUnblockIP}
-      />
-
-      {/* Attack Simulator Modal */}
-      <AttackSimulatorModal
-        isOpen={isSimulatorOpen}
-        onClose={() => setIsSimulatorOpen(false)}
-        onAttackSimulated={fetchOverview}
-      />
-
-      {/* Threat Map Modal */}
-      <ThreatMapModal
-        isOpen={isMapOpen}
-        onClose={() => setIsMapOpen(false)}
-        alerts={alerts}
-      />
-
-      {/* Firewall & WAF Rules Modal */}
-      <FirewallModal
-        isOpen={isFirewallOpen}
-        onClose={() => setIsFirewallOpen(false)}
-        onRefresh={fetchOverview}
-      />
-
-      {/* Security Report Modal */}
-      <SecurityReportModal
-        isOpen={isReportOpen}
-        onClose={() => setIsReportOpen(false)}
-      />
-
-      {/* Live Traffic Inspector Drawer */}
-      <LiveTrafficDrawer
-        isOpen={isTrafficOpen}
-        onClose={() => setIsTrafficOpen(false)}
-        packets={trafficPackets}
-      />
-      <IntegrationsModal isOpen={isIntegrationsOpen} onClose={() => setIsIntegrationsOpen(false)} />
+        <main className="dashboard-main">
+          <div className="dashboard-heading">
+            <div><h1>Dashboard</h1><p>Monitor activity and review your connected websites.</p></div>
+            <div className="dashboard-actions">
+              <button className="action-button" onClick={() => setIsSimulatorOpen(true)}><Zap size={15} /> Safe simulation</button>
+              <button className="action-button action-button--primary" onClick={() => setIsIntegrationsOpen(true)}><Link2 size={15} /> Add website</button>
+            </div>
+          </div>
+          <ThreatLevelBanner
+            threatLevel={metrics?.threat_level || 'UNKNOWN'}
+            activeThreats={metrics?.active_threats ?? null}
+            blockedToday={metrics?.blocked_today ?? null}
+            riskScore={metrics?.risk_score ?? null}
+          />
+          <MetricCards metrics={metrics} />
+          <DashboardWorkbench packets={trafficPackets} alerts={alerts} />
+          <RecentActivityTable alerts={alerts} onSelectAlert={(alert) => setSelectedAlert(alert)} />
+        </main>
+        <ThreatDetailModal alert={selectedAlert} onClose={() => setSelectedAlert(null)} onBlockIP={handleBlockIP} onUnblockIP={handleUnblockIP} />
+        <AttackSimulatorModal isOpen={isSimulatorOpen} onClose={() => setIsSimulatorOpen(false)} onAttackSimulated={fetchOverview} />
+        <ThreatMapModal isOpen={isMapOpen} onClose={() => setIsMapOpen(false)} alerts={alerts} />
+        <FirewallModal isOpen={isFirewallOpen} onClose={() => setIsFirewallOpen(false)} onRefresh={fetchOverview} />
+        <SecurityReportModal isOpen={isReportOpen} onClose={() => setIsReportOpen(false)} />
+        <LiveTrafficDrawer isOpen={isTrafficOpen} onClose={() => setIsTrafficOpen(false)} packets={trafficPackets} />
+        <IntegrationsModal isOpen={isIntegrationsOpen} onClose={() => setIsIntegrationsOpen(false)} />
       </div>
     </div>
   );
